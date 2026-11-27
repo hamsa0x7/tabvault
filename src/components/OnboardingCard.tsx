@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Check, CheckCircle2, Circle, Cloud, HelpCircle, X } from "lucide-react";
+import { Check, CheckCircle2, Circle, Cloud, HelpCircle, Smartphone, X } from "lucide-react";
 import type { OnboardingProgress } from "../shared/onboarding.ts";
 import { sendBg } from "../shared/rpc.ts";
 import { Button, cn } from "./ui.tsx";
@@ -24,6 +24,7 @@ interface OnboardingCardProps {
   showSetupBar?: boolean;
   driveConnected?: boolean;
   driveEmail?: string | null;
+  mirrorToBookmarks?: boolean;
   onRefresh?: () => void | Promise<void>;
   onToast?: (msg: string) => void;
 }
@@ -42,19 +43,26 @@ export function OnboardingCard({
   showSetupBar = false,
   driveConnected = false,
   driveEmail,
+  mirrorToBookmarks = false,
   onRefresh,
   onToast,
 }: OnboardingCardProps) {
   const isCompact = variant === "compact";
   const [downloadsGranted, setDownloadsGranted] = useState(false);
+  const [bookmarksGranted, setBookmarksGranted] = useState(false);
   const [busyDownloads, setBusyDownloads] = useState(false);
   const [busyDrive, setBusyDrive] = useState(false);
+  const [busyMobile, setBusyMobile] = useState(false);
 
   useEffect(() => {
     if (isCompact || !showSetupBar) return;
     chrome?.permissions
       ?.contains?.({ permissions: ["downloads"] })
       .then((ok) => setDownloadsGranted(Boolean(ok)))
+      .catch(() => {});
+    chrome?.permissions
+      ?.contains?.({ permissions: ["bookmarks"] })
+      .then((ok) => setBookmarksGranted(Boolean(ok)))
       .catch(() => {});
   }, [isCompact, showSetupBar]);
 
@@ -65,7 +73,12 @@ export function OnboardingCard({
       const ok = await chrome.permissions.request({ permissions: ["downloads"] });
       setDownloadsGranted(Boolean(ok));
       if (ok) {
-        onToast?.("Downloads backup permission enabled");
+        const res = await sendBg<{ files: number; sessions: number }>("backupNow").catch(() => null);
+        onToast?.(
+          res && typeof res.files === "number"
+            ? `Downloads backup enabled — saved ${res.files} backup file${res.files === 1 ? "" : "s"}`
+            : "Downloads backup permission enabled"
+        );
         await onRefresh?.();
       }
     } catch {
@@ -97,6 +110,30 @@ export function OnboardingCard({
       onToast?.(String((err as Error).message || err));
     } finally {
       setBusyDrive(false);
+    }
+  };
+
+  const handleEnableMobileSync = async () => {
+    if (busyMobile || (mirrorToBookmarks && bookmarksGranted)) return;
+    setBusyMobile(true);
+    try {
+      if (chrome?.permissions?.request) {
+        const granted = await chrome.permissions.request({ permissions: ["bookmarks"] }).catch(() => false);
+        setBookmarksGranted(Boolean(granted));
+        if (!granted) {
+          onToast?.("Allow Bookmarks permission to access collections on mobile.");
+          return;
+        }
+      } else {
+        setBookmarksGranted(true);
+      }
+      await sendBg("setSettings", { patch: { mirrorToBookmarks: true } });
+      await onRefresh?.();
+      onToast?.("Collections mirrored to Other Bookmarks > TabVault (syncs via your Chrome profile)");
+    } catch (err) {
+      onToast?.(String((err as Error)?.message || err));
+    } finally {
+      setBusyMobile(false);
     }
   };
 
@@ -260,6 +297,24 @@ export function OnboardingCard({
                 : busyDrive
                   ? "Signing in…"
                   : "Sign in with Google"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busyMobile || (mirrorToBookmarks && bookmarksGranted)}
+              data-tip="One-way mirror to Other Bookmarks > TabVault (syncs to Chrome Mobile via your Chrome profile)"
+              onClick={() => void handleEnableMobileSync()}
+            >
+              {mirrorToBookmarks && bookmarksGranted ? (
+                <Check className="w-3.5 h-3.5 text-[var(--st-success)]" />
+              ) : (
+                <Smartphone className="w-3.5 h-3.5" />
+              )}
+              {mirrorToBookmarks && bookmarksGranted
+                ? "Bookmarks Mirror On"
+                : busyMobile
+                  ? "Enabling…"
+                  : "Access on Mobile"}
             </Button>
           </div>
         </div>

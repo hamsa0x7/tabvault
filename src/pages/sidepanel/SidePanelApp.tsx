@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Archive, ArrowLeftRight, ExternalLink, FolderPlus, Layers, Pin, Plus, RotateCcw, Save, Search, Settings as SettingsIcon, X } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeftRight, ExternalLink, FolderPlus, Layers, Pin, Plus, RotateCcw, Save, Search, Settings as SettingsIcon, ShieldCheck, Smartphone, X } from "lucide-react";
 import { BackupPermissionBanner, BuyMeACoffeeButton, HeaderAccountButton, HeaderSleepButton, QuickIntervalButton } from "../../components/HeaderExtras.tsx";
 import { ConfirmDialog } from "../../components/ConfirmDialog.tsx";
 import { EmptyStateCard, OnboardingCard } from "../../components/OnboardingCard.tsx";
@@ -43,6 +43,13 @@ export function SidePanelApp() {
   const [sessionName, setSessionName] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmCloseWin, setConfirmCloseWin] = useState(false);
+  const [formGuardDismissed, setFormGuardDismissed] = useState(() => {
+    try {
+      return localStorage.getItem("tabvault:formGuardPromptDismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const openDashboard = async (sectionParam?: string) => {
     const path = sectionParam ? `dashboard.html?section=${sectionParam}` : "dashboard.html";
@@ -256,7 +263,11 @@ export function SidePanelApp() {
         </div>
       )}
 
-      <BackupPermissionBanner onToast={showToast} compact />
+      <BackupPermissionBanner
+        onToast={showToast}
+        compact
+        show={(state?.counts.named ?? 0) + (state?.counts.collections ?? 0) >= 2}
+      />
 
       {/* Conditional Crash Recovery Banner */}
       {rec && (
@@ -295,6 +306,55 @@ export function SidePanelApp() {
             >
               Restore
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Conditional Tab Sleep Form Protection Prompt */}
+      {state?.settings.suspenderEnabled && !state?.settings.guardUnsavedForms && !formGuardDismissed && (
+        <div className="mx-3 mt-2 px-2.5 py-2 rounded-lg border border-[var(--st-border)] bg-[var(--st-surface)] flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0 text-[11.5px] text-[var(--st-muted)]">
+            <ShieldCheck className="w-3.5 h-3.5 text-[var(--st-accent)] shrink-0" />
+            <span className="truncate">Protect typed forms when tabs sleep?</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              onClick={async () => {
+                try {
+                  if (chrome?.permissions?.request) {
+                    const ok = await chrome.permissions.request({ permissions: ["scripting"] }).catch(() => false);
+                    if (!ok) {
+                      showToast("Allow Scripting permission to protect unsaved forms.");
+                      return;
+                    }
+                  }
+                  await sendBg("setSettings", { patch: { guardUnsavedForms: true } });
+                  await refresh();
+                  showToast("Unsaved form protection enabled");
+                } catch (e) {
+                  showToast(String((e as Error)?.message || e));
+                }
+              }}
+            >
+              Protect Forms
+            </Button>
+            <button
+              type="button"
+              aria-label="Dismiss form protection prompt"
+              className="p-0.5 text-[var(--st-muted)] hover:text-[var(--st-ink)] cursor-pointer"
+              onClick={() => {
+                setFormGuardDismissed(true);
+                try {
+                  localStorage.setItem("tabvault:formGuardPromptDismissed", "1");
+                } catch {
+                  /* ignore */
+                }
+              }}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}
@@ -660,22 +720,50 @@ export function SidePanelApp() {
           })()
         ) : (
           <div className="space-y-2">
-            <Button
-              variant="outline"
-              className="w-full h-8 text-[12px]"
-              title="Save the current window's tabs as a Collection so you can switch back to it anytime"
-              onClick={() =>
-                void sendBg("saveWindowAsSpace", { windowId: currentWin?.id })
-                  .then(() => {
-                    showToast("Saved current window as Collection");
-                    return refresh();
-                  })
-                  .catch((e) => showToast(String((e as Error)?.message || e)))
-              }
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Save Window as Collection
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                className="flex-1 h-8 text-[12px]"
+                title="Save the current window's tabs as a Collection so you can switch back to it anytime"
+                onClick={() =>
+                  void sendBg("saveWindowAsSpace", { windowId: currentWin?.id })
+                    .then(() => {
+                      showToast("Saved current window as Collection");
+                      return refresh();
+                    })
+                    .catch((e) => showToast(String((e as Error)?.message || e)))
+                }
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Save Window as Collection
+              </Button>
+              {!state?.settings.mirrorToBookmarks && (
+                <Button
+                  variant="outline"
+                  className="h-8 px-2.5 text-[11.5px] shrink-0"
+                  title="Mirror collections to Other Bookmarks > TabVault for Chrome Mobile"
+                  onClick={async () => {
+                    try {
+                      if (chrome?.permissions?.request) {
+                        const ok = await chrome.permissions.request({ permissions: ["bookmarks"] }).catch(() => false);
+                        if (!ok) {
+                          showToast("Allow Bookmarks permission to access collections on mobile.");
+                          return;
+                        }
+                      }
+                      await sendBg("setSettings", { patch: { mirrorToBookmarks: true } });
+                      await refresh();
+                      showToast("Synced to Other Bookmarks > TabVault for Chrome Mobile");
+                    } catch (e) {
+                      showToast(String((e as Error)?.message || e));
+                    }
+                  }}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  Mobile Sync
+                </Button>
+              )}
+            </div>
             {(() => {
               const visibleCols = collections.filter((c) => !q || c.title.toLowerCase().includes(q));
               if (visibleCols.length === 0) {

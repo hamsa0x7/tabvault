@@ -191,11 +191,17 @@ export function HeaderAccountButton({
                   {e2eLocked ? "Auto-sync paused — enter backup password" : "Google Drive Connected"}
                 </div>
                 <div className="text-[12.5px] font-semibold truncate">{email}</div>
-                <div className="text-[11px] text-[var(--st-muted)]">
+                <div className="text-[11px] text-[var(--st-muted)] truncate">
+                  {state?.settings.deviceName ? `${state.settings.deviceName} · ` : ""}
                   {state?.lastSyncAt
                     ? `Last synced ${formatTimestamp(state.lastSyncAt, "relative")}`
                     : "Not synced yet"}
                 </div>
+                {state?.lastSyncError && (
+                  <div className="text-[11px] text-[var(--st-danger)] leading-snug pt-0.5">
+                    {state.lastSyncError}
+                  </div>
+                )}
               </div>
               {e2eLocked && (
                 <form
@@ -500,14 +506,16 @@ export function WelcomeInstallBanner({
 export function BackupPermissionBanner({
   onToast,
   compact = false,
+  show = true,
 }: {
   onToast: (msg: string) => void;
   compact?: boolean;
+  show?: boolean;
 }) {
   const { granted, request } = useDownloadsPermission();
   const [dismissed, setDismissed] = useState(false);
 
-  if (granted || dismissed) return null;
+  if (!show || granted || dismissed) return null;
 
   return (
     <div
@@ -533,7 +541,12 @@ export function BackupPermissionBanner({
           onClick={async () => {
             const ok = await request();
             if (ok) {
-              onToast("File backup permission granted");
+              const res = await sendBg<{ files: number; sessions: number }>("backupNow").catch(() => null);
+              onToast(
+                res && typeof res.files === "number"
+                  ? `File backup permission granted — saved ${res.files} backup file${res.files === 1 ? "" : "s"}`
+                  : "File backup permission granted"
+              );
             } else {
               onToast("Allow Downloads permission to save backup files");
             }
@@ -578,9 +591,28 @@ export function HeaderSleepButton({
     setBusy(true);
     try {
       const next = !enabled;
-      await sendBg("setSettings", { patch: { suspenderEnabled: next } });
+      let autoEnabledFormGuard = false;
+      const patch: Record<string, unknown> = { suspenderEnabled: next };
+      if (next && !state.settings.guardUnsavedForms) {
+        const hasScripting =
+          Boolean(state.scriptingPermissionGranted) ||
+          (await chrome.permissions?.contains?.({ permissions: ["scripting"] }).catch(() => false));
+        if (hasScripting) {
+          patch.guardUnsavedForms = true;
+          autoEnabledFormGuard = true;
+        }
+      }
+      await sendBg("setSettings", { patch });
       await onRefresh();
-      onToast(next ? `Tab Sleep enabled (${mins}m idle)` : "Tab Sleep disabled");
+      if (!next) {
+        onToast("Tab Sleep disabled");
+      } else if (autoEnabledFormGuard) {
+        onToast(`Tab Sleep enabled (${mins}m idle) with form protection`);
+      } else if (!state.settings.guardUnsavedForms) {
+        onToast(`Tab Sleep enabled (${mins}m idle). Enable Form Protection in Settings > Tab Sleep to guard typed text.`);
+      } else {
+        onToast(`Tab Sleep enabled (${mins}m idle)`);
+      }
     } catch (err) {
       onToast(String((err as Error).message || err));
     } finally {

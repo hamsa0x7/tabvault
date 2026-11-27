@@ -195,7 +195,11 @@ export function PopupApp() {
         </div>
       </header>
 
-      <BackupPermissionBanner onToast={showToast} compact />
+      <BackupPermissionBanner
+        onToast={showToast}
+        compact
+        show={(state?.counts.named ?? 0) + (state?.counts.collections ?? 0) >= 2}
+      />
 
       {/* Conditional Crash Recovery Banner */}
       {rec && (

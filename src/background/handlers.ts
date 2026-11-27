@@ -819,6 +819,9 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
       if (keys.length === 0 || keys.includes("showBadgeAlert") || keys.includes("showTabCountBadge")) {
         await updateBadge();
       }
+      if (patch && patch.mirrorToBookmarks) {
+        void syncCollectionsToBookmarks().catch(() => {});
+      }
       void maybeAutoSyncDrive(next);
       return next;
     },

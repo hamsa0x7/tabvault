@@ -675,6 +675,37 @@ export function OptionsApp({
                   onCheckedChange={(v) => void patchSettings({ checkUpdatesOnStartup: v })}
                 />
               </SettingRow>
+              <SettingRow
+                title="Privacy Policy &amp; Open-Source Licenses"
+                description="Review how TabVault handles local data, permissions, and third-party notices."
+              >
+                <div className="flex flex-wrap items-center gap-3 text-[12px] shrink-0">
+                  <a
+                    href={typeof chrome !== "undefined" && chrome.runtime?.getURL ? chrome.runtime.getURL("privacy.html") : "privacy.html"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[var(--st-accent)] font-medium hover:underline"
+                  >
+                    Privacy Policy
+                  </a>
+                  <a
+                    href={typeof chrome !== "undefined" && chrome.runtime?.getURL ? chrome.runtime.getURL("LICENSE") : "LICENSE"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[var(--st-accent)] font-medium hover:underline"
+                  >
+                    MIT License
+                  </a>
+                  <a
+                    href={typeof chrome !== "undefined" && chrome.runtime?.getURL ? chrome.runtime.getURL("THIRD_PARTY_NOTICES.txt") : "THIRD_PARTY_NOTICES.txt"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[var(--st-accent)] font-medium hover:underline"
+                  >
+                    Third-Party Notices
+                  </a>
+                </div>
+              </SettingRow>
             </Card>
           )}
 

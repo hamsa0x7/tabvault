@@ -2,7 +2,7 @@
 
 **Effective Date:** November 26, 2026  
 **Extension Name:** TabVault  
-**Contact:** `[your-support-email@example.com]` *(replace with your published support email before hosting)*
+**Contact:** `support@94arts.com`
 
 ## 1. Overview & Local-First Processing
 
@@ -27,12 +27,12 @@ TabVault requests the following permissions **only** when you explicitly enable 
 - **Bookmark Sync & Pinning (`bookmarks`):** Used solely to sync collections or pin sessions to your Chrome Bookmarks bar when you enable bookmark integration.
 - **Unsaved Form Detection (`scripting`):** Used solely before suspending an idle tab to check whether the page contains unsaved `<input>` or `<textarea>` text so your work is not lost. No page content is stored or transmitted.
 - **Chrome Reading List Import (`readingList`):** Used solely when you explicitly click **Import Reading List** in Settings or Collections to copy your saved Reading List links into a local TabVault Collection.
-- **Google Drive Backup Sync (`identity`, `https://www.googleapis.com/*`, `https://accounts.google.com/*`, `https://oauth2.googleapis.com/*`):** Used **only** if you explicitly sign in to Google Drive in Options to back up or restore your own TabVault backup files in your personal Google Drive account. Authentication is handled via Chrome's `chrome.identity.launchWebAuthFlow` OAuth2 flow directly with Google. TabVault's developers never receive your Google credentials or Drive contents.
+- **Google Drive Backup Sync (`identity`, `https://www.googleapis.com/*`, `https://accounts.google.com/*`, `https://oauth2.googleapis.com/*`, `https://tabvault-oauth.94artsdesignstudio-bd8.workers.dev/*`):** Used **only** if you explicitly sign in to Google Drive in Options to back up or restore your own TabVault backup files in your personal Google Drive account. Authentication is handled via Chrome's `chrome.identity.launchWebAuthFlow` OAuth2 flow with a stateless OAuth token-exchange worker (`tabvault-oauth.94artsdesignstudio-bd8.workers.dev`) that does not log or store your Drive contents or browsing data. TabVault's developers never receive your Google Drive contents.
 
 ## 4. Data Sharing, Tracking & Retention
 
 - **No Tracking:** TabVault contains zero third-party analytics, advertising SDKs, or tracking pixels.
-- **No Third-Party Sharing:** Your data is never sold or shared with advertisers, data brokers, or external services. The only external network communication occurs if you explicitly initiate Google Drive sync with your own Google account.
+- **No Third-Party Sharing:** Your data is never sold or shared with advertisers, data brokers, or external services. External network communication occurs **only** when you explicitly initiate Google Drive sync with your own Google account, check for extension updates (`/releases/latest`), or submit voluntary in-app feedback (`/feedback`).
 - **Retention & Deletion:** All local data remains on your device until you delete sessions/collections inside TabVault, clear extension storage, or uninstall the extension.
 
 ## 5. Third-Party Trademarks & Disclaimer

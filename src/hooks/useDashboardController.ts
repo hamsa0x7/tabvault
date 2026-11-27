@@ -143,6 +143,9 @@ export function useDashboardController() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importPassword, setImportPassword] = useState("");
+
+  const [promoteTargetId, setPromoteTargetId] = useState<string | null>(null);
+  const [promoteNameInput, setPromoteNameInput] = useState("");
   const [driveSyncPassword, setDriveSyncPassword] = useState("");
 
   // Inspector inline edit fields
@@ -656,12 +659,21 @@ export function useDashboardController() {
     }
   };
 
-  const handlePromoteSnapshot = async (id: string) => {
-    const name = window.prompt("Name for this saved session:", selectedSnapshot?.name || "");
-    if (name === null) return;
+  const handlePromoteSnapshot = (id: string) => {
+    setPromoteTargetId(id);
+    setPromoteNameInput(selectedSnapshot?.name || "");
+  };
+
+  const handlePromoteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!promoteTargetId) return;
     setBusy(true);
     try {
-      const created = await sendBg<SnapshotMeta>("promoteSnapshot", { id, name: name.trim() });
+      const created = await sendBg<SnapshotMeta>("promoteSnapshot", {
+        id: promoteTargetId,
+        name: promoteNameInput.trim(),
+      });
+      setPromoteTargetId(null);
       await loadAll();
       setSelectedSnapshotId(created.id);
       setSelectedCollectionId(null);
@@ -1296,6 +1308,11 @@ export function useDashboardController() {
     handleCollapse,
     handleRestoreSnapshot,
     handlePromoteSnapshot,
+    promoteTargetId,
+    setPromoteTargetId,
+    promoteNameInput,
+    setPromoteNameInput,
+    handlePromoteSubmit,
     handleDeleteSnapshots,
     handleSaveSnapshotMeta,
     handleDeduplicate,

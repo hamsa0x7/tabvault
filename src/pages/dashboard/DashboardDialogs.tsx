@@ -269,6 +269,56 @@ export function DashboardDialogs({ ctrl }: { ctrl: DashboardController }) {
         </Dialog.Portal>
       </Dialog.Root>
 
+      {/* Save Copy / Promote Snapshot Dialog */}
+      <Dialog.Root
+        open={Boolean(ctrl.promoteTargetId)}
+        onOpenChange={(open) => {
+          if (!open) ctrl.setPromoteTargetId(null);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-sm rounded-2xl border border-[var(--st-border)] bg-[var(--st-surface)] text-[var(--st-ink)] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <Dialog.Title className="text-[15px] font-semibold">Save Copy of Session</Dialog.Title>
+              <Dialog.Close asChild>
+                <Button size="icon" variant="ghost" aria-label="Close dialog">
+                  <X className="w-4 h-4" />
+                </Button>
+              </Dialog.Close>
+            </div>
+            <Dialog.Description className="text-[12.5px] text-[var(--st-muted)]">
+              Create a named copy of this session in your saved history.
+            </Dialog.Description>
+            <form onSubmit={(e) => void ctrl.handlePromoteSubmit(e)} className="space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="st-promote-name" className="text-[12px] font-medium">
+                  Session name
+                </label>
+                <Input
+                  id="st-promote-name"
+                  value={ctrl.promoteNameInput}
+                  onChange={(e) => ctrl.setPromoteNameInput(e.target.value)}
+                  placeholder="Enter a name for this saved session"
+                  className="w-full"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Dialog.Close asChild>
+                  <Button type="button" variant="outline">
+                    Cancel
+                  </Button>
+                </Dialog.Close>
+                <Button type="submit" variant="primary" disabled={ctrl.busy}>
+                  Save Copy
+                </Button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
       <ConfirmDialog request={ctrl.confirmRequest} onResolve={ctrl.resolveConfirm} />
     </>
   );

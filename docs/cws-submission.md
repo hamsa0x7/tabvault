@@ -15,7 +15,7 @@ Use this reference when filling out the **Chrome Developer Dashboard** for TabVa
 - **Support Email:**
   `support@94arts.com` *(set and verify in Chrome Developer Dashboard)*
 - **Privacy Policy URL:**
-  `https://<your-github-username>.github.io/<repo>/PRIVACY` *(host `PRIVACY.md` on a public HTTPS URL before submitting)*
+  `https://github.com/hamsa0x7/tabvault/blob/main/PRIVACY.md`
 
 ### Full Store Description (Draft)
 

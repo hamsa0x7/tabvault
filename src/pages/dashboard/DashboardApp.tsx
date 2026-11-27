@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Search,
   Settings as SettingsIcon,
+  Smartphone,
   Star,
   Undo2,
   Upload,
@@ -32,6 +33,7 @@ import { EmptyStateCard, OnboardingCard } from "../../components/OnboardingCard.
 import { Button, Checkbox, DashboardSkeleton, GlobalTooltip, Input, Select, TabFavicon, cn } from "../../components/ui.tsx";
 import {
   type DateFilter,
+  type KindFilter,
   type NavSection,
   type SortOrder,
   kindLabel,
@@ -308,7 +310,12 @@ export function DashboardApp() {
         </div>
       )}
 
-      {!showWelcome && <BackupPermissionBanner onToast={ctrl.notify} />}
+      {!showWelcome && (
+        <BackupPermissionBanner
+          onToast={ctrl.notify}
+          show={(state?.counts.named ?? 0) + (state?.counts.collections ?? 0) >= 2}
+        />
+      )}
 
       {/* Pinned Top Bar */}
       <header className="min-h-[52px] px-3 sm:px-4 py-1.5 bg-[var(--st-surface)] border-b border-[var(--st-border)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 shrink-0">
@@ -816,6 +823,35 @@ export function DashboardApp() {
                         Stale &gt;30d ({staleCollections.length})
                       </Button>
                       <Button
+                        variant={settings.mirrorToBookmarks ? "outline" : "outline"}
+                        disabled={ctrl.busy}
+                        title={
+                          settings.mirrorToBookmarks
+                            ? "Collections are mirrored to Other Bookmarks > TabVault for Chrome Mobile (click to disable)"
+                            : "Mirror collections to Other Bookmarks > TabVault so you can access them on Chrome Mobile"
+                        }
+                        onClick={async () => {
+                          const next = !settings.mirrorToBookmarks;
+                          if (next && chrome.permissions?.request) {
+                            const ok = await chrome.permissions.request({ permissions: ["bookmarks"] }).catch(() => false);
+                            if (!ok) {
+                              ctrl.notify("Allow Bookmarks permission to access collections on mobile.");
+                              return;
+                            }
+                          }
+                          await sendBg("setSettings", { patch: { mirrorToBookmarks: next } });
+                          await ctrl.loadAll();
+                          ctrl.notify(
+                            next
+                              ? "Synced to Other Bookmarks > TabVault for Chrome Mobile"
+                              : "Mobile bookmarks mirror disabled"
+                          );
+                        }}
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                        {settings.mirrorToBookmarks ? "Mobile Synced" : "Mobile Sync"}
+                      </Button>
+                      <Button
                         variant="outline"
                         disabled={ctrl.busy}
                         onClick={() => void ctrl.handleImportReadingList()}
@@ -847,34 +883,62 @@ export function DashboardApp() {
                     </div>
                   </div>
                 ) : activeSection === "auto" ? (
-                  <div className="pb-3 flex items-center justify-between gap-2">
-                    <div>
-                      <h1 className="text-[16px] font-bold tracking-tight">Auto-Save History</h1>
-                      <p className="text-[12px] text-[var(--st-muted)]">
-                        Automatic safety snapshots grouped by day
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant={showRecentlyClosed ? "primary" : "outline"}
-                        onClick={() => setShowRecentlyClosed((v) => !v)}
-                        title="View and reopen recently closed tabs and windows from Chrome"
-                      >
-                        Recently Closed
-                      </Button>
-                      {!showRecentlyClosed && (
-                        <Select
-                          aria-label="Filter history by date"
-                          value={ctrl.dateFilter}
-                          onChange={(e) => ctrl.setDateFilter(e.target.value as DateFilter)}
+                  <div className="pb-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h1 className="text-[16px] font-bold tracking-tight">Auto-Save History</h1>
+                        <p className="text-[12px] text-[var(--st-muted)]">
+                          Automatic safety snapshots grouped by day
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant={showRecentlyClosed ? "primary" : "outline"}
+                          onClick={() => setShowRecentlyClosed((v) => !v)}
+                          title="View and reopen recently closed tabs and windows from Chrome"
                         >
-                          <option value="all">All time</option>
-                          <option value="today">Today</option>
-                          <option value="week">Last 7 days</option>
-                          <option value="month">Last 30 days</option>
-                        </Select>
-                      )}
+                          Recently Closed
+                        </Button>
+                        {!showRecentlyClosed && (
+                          <Select
+                            aria-label="Filter history by date"
+                            value={ctrl.dateFilter}
+                            onChange={(e) => ctrl.setDateFilter(e.target.value as DateFilter)}
+                          >
+                            <option value="all">All time</option>
+                            <option value="today">Today</option>
+                            <option value="week">Last 7 days</option>
+                            <option value="month">Last 30 days</option>
+                          </Select>
+                        )}
+                      </div>
                     </div>
+                    {!showRecentlyClosed && (
+                      <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter auto-saves by type">
+                        {(
+                          [
+                            ["all", "All"],
+                            ["auto", "Auto-save"],
+                            ["windowClose", "Window closed"],
+                            ["browserExit", "Before exit"],
+                          ] as Array<[KindFilter, string]>
+                        ).map(([kind, label]) => (
+                          <button
+                            key={kind}
+                            type="button"
+                            onClick={() => ctrl.setKindFilter(kind)}
+                            className={cn(
+                              "h-6.5 px-2.5 rounded-md text-[11.5px] font-semibold cursor-pointer transition-colors",
+                              ctrl.kindFilter === kind
+                                ? "bg-[var(--st-accent-soft)] text-[var(--st-accent)]"
+                                : "text-[var(--st-muted)] hover:bg-[var(--st-subtle)]"
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="pb-3 flex items-center justify-between gap-2">
@@ -948,6 +1012,7 @@ export function DashboardApp() {
                     showSetupBar={showWelcome}
                     driveConnected={Boolean(state?.driveConnected)}
                     driveEmail={state?.driveEmail}
+                    mirrorToBookmarks={Boolean(state?.settings.mirrorToBookmarks)}
                     onRefresh={ctrl.loadAll}
                     onToast={ctrl.notify}
                     steps={[

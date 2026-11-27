@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy — TabVault</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fafafa;
+        --surface: #ffffff;
+        --ink: #18181b;
+        --muted: #52525b;
+        --border: #e4e4e7;
+        --accent: #2563eb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #09090b;
+          --surface: #111113;
+          --ink: #f4f4f5;
+          --muted: #a1a1aa;
+          --border: #27272a;
+          --accent: #60a5fa;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 32px 16px 64px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        line-height: 1.6;
+        font-size: 15px;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 32px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        letter-spacing: -0.02em;
+      }
+      .meta {
+        margin: 0 0 24px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 13px;
+      }
+      h2 {
+        margin: 24px 0 8px;
+        font-size: 17px;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0 0 12px;
+      }
+      ul {
+        margin: 0 0 12px;
+        padding-left: 20px;
+      }
+      li {
+        margin-bottom: 8px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacy Policy for TabVault</h1>
+      <p class="meta">
+        <strong>Effective Date:</strong> November 26, 2026 &middot;
+        <strong>Extension:</strong> TabVault &middot;
+        <strong>Contact:</strong> <a href="mailto:support@94arts.com" style="color: var(--accent);">support@94arts.com</a>
+      </p>
+
+      <h2>1. Overview &amp; Local-First Processing</h2>
+      <p>
+        TabVault is a local-first Chrome extension designed to auto-save open windows, tabs, and tab groups,
+        recover lost sessions, suspend idle tabs, and organize collections.
+      </p>
+      <p>
+        All core tab management, session indexing, search, and optional client-side backup encryption occur
+        <strong>100% locally</strong> inside your browser using Chrome Extension Storage (<code>chrome.storage</code>)
+        and IndexedDB. TabVault does <strong>not</strong> operate any proprietary backend servers, does
+        <strong>not</strong> collect telemetry or usage analytics, and does <strong>not</strong> sell, rent, or
+        transfer your browsing data to third parties.
+      </p>
+
+      <h2>2. Data Accessed &amp; How It Is Used</h2>
+      <p>
+        To provide its core functionality, TabVault accesses only the data strictly required for user-initiated or
+        configured local features:
+      </p>
+      <ul>
+        <li>
+          <strong>Open Tabs, Windows &amp; Tab Groups (<code>tabs</code>, <code>tabGroups</code>, <code>favicon</code>):</strong>
+          Used locally to capture, display, search, deduplicate, suspend, and restore your browser sessions and collections.
+        </li>
+        <li>
+          <strong>Local Storage (<code>storage</code>, <code>unlimitedStorage</code>):</strong>
+          Used to persist your saved snapshots, collections, extension preferences, and temporary tab activity timestamps
+          (<code>chrome.storage.session</code>) on your device.
+        </li>
+        <li>
+          <strong>Background Scheduling &amp; Offscreen Processing (<code>alarms</code>, <code>offscreen</code>):</strong>
+          Used to run periodic local auto-save / idle-tab suspension checks and to generate local Blob download URLs for
+          large session export files.
+        </li>
+        <li>
+          <strong>UI Surfaces (<code>sidePanel</code>, <code>contextMenus</code>):</strong>
+          Used to render the TabVault side panel and right-click context menu actions.
+        </li>
+      </ul>
+
+      <h2>3. Optional Permissions (Disabled by Default)</h2>
+      <p>
+        TabVault requests the following permissions <strong>only</strong> when you explicitly enable the corresponding
+        feature in Settings:
+      </p>
+      <ul>
+        <li>
+          <strong>Local File Exports (<code>downloads</code>):</strong>
+          Used solely to save exported session backups (JSON, HTML, CSV, Markdown, or OneTab text) to your local
+          Downloads folder when you click Export.
+        </li>
+        <li>
+          <strong>Bookmark Sync &amp; Pinning (<code>bookmarks</code>):</strong>
+          Used solely to sync collections or pin sessions to your Chrome Bookmarks bar when you enable bookmark integration.
+        </li>
+        <li>
+          <strong>Unsaved Form Detection (<code>scripting</code>):</strong>
+          Used solely before suspending an idle tab to check whether the page contains unsaved
+          <code>&lt;input&gt;</code> or <code>&lt;textarea&gt;</code> text so your work is not lost. No page content is
+          stored or transmitted.
+        </li>
+        <li>
+          <strong>Chrome Reading List Import (<code>readingList</code>):</strong>
+          Used solely when you explicitly click <strong>Import Reading List</strong> in Settings or Collections to copy
+          your saved Reading List links into a local TabVault Collection.
+        </li>
+        <li>
+          <strong>Google Drive Backup Sync (<code>identity</code>, Google Drive API, <code>tabvault-oauth.94artsdesignstudio-bd8.workers.dev</code>):</strong>
+          Used <strong>only</strong> if you explicitly sign in to Google Drive in Options to back up or restore your own
+          TabVault backup files in your personal Google Drive account. Authentication is handled via Chrome's
+          <code>chrome.identity.launchWebAuthFlow</code> OAuth2 flow with a stateless OAuth token-exchange worker
+          (<code>tabvault-oauth.94artsdesignstudio-bd8.workers.dev</code>) that does not log or store your Drive contents
+          or browsing data. TabVault's developers never receive your Google Drive contents.
+        </li>
+      </ul>
+
+      <h2>4. Data Sharing, Tracking &amp; Retention</h2>
+      <ul>
+        <li><strong>No Tracking:</strong> TabVault contains zero third-party analytics, advertising SDKs, or tracking pixels.</li>
+        <li>
+          <strong>No Third-Party Sharing:</strong> Your data is never sold or shared with advertisers, data brokers, or
+          external services. External network communication occurs <strong>only</strong> when you explicitly initiate
+          Google Drive sync with your own Google account, check for extension updates (<code>/releases/latest</code>),
+          or submit voluntary in-app feedback (<code>/feedback</code>).
+        </li>
+        <li>
+          <strong>Retention &amp; Deletion:</strong> All local data remains on your device until you delete
+          sessions/collections inside TabVault, clear extension storage, or uninstall the extension.
+        </li>
+      </ul>
+
+      <h2>5. Third-Party Trademarks &amp; Disclaimer</h2>
+      <p>
+        TabVault is an independent browser extension and is not affiliated with, endorsed by, or officially connected to
+        Google LLC, Google Chrome, Google Drive, or any third-party bookmarking or session-management tools whose export
+        formats are supported for user import (such as OneTab, Session Buddy, Tab Session Manager, Tablerone, TabXpert,
+        Pocket, Pinboard, or Linkwarden). All product and company names are trademarks&trade; or registered&reg;
+        trademarks of their respective holders.
+      </p>
+
+      <h2>6. Changes to This Policy</h2>
+      <p>
+        If TabVault's data practices change, this Privacy Policy will be updated with a revised effective date prior to
+        publishing the updated extension version.
+      </p>
+    </main>
+  </body>
+</html>
