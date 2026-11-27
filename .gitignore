@@ -15,6 +15,7 @@ creds/
 *.zip
 
 # Local research, scratch & logs
+archive/
 _research_extensions/
 brag-output*/
 release_videos/
