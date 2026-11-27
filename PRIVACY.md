@@ -23,7 +23,7 @@ To provide its core functionality, TabVault accesses only the data strictly requ
 
 TabVault requests the following permissions **only** when you explicitly enable the corresponding feature in Settings:
 
-- **Local File Exports (`downloads`):** Used solely to save exported session backups (JSON, HTML, CSV, Markdown, or OneTab text) to your local Downloads folder when you click Export.
+- **Local File Exports (`downloads`):** Used solely to save exported session backups (JSON, HTML, CSV, Markdown, or plain-text URL lists) to your local Downloads folder when you click Export.
 - **Bookmark Sync & Pinning (`bookmarks`):** Used solely to sync collections or pin sessions to your Chrome Bookmarks bar when you enable bookmark integration.
 - **Unsaved Form Detection (`scripting`):** Used solely before suspending an idle tab to check whether the page contains unsaved `<input>` or `<textarea>` text so your work is not lost. No page content is stored or transmitted.
 - **Chrome Reading List Import (`readingList`):** Used solely when you explicitly click **Import Reading List** in Settings or Collections to copy your saved Reading List links into a local TabVault Collection.
@@ -37,7 +37,7 @@ TabVault requests the following permissions **only** when you explicitly enable 
 
 ## 5. Third-Party Trademarks & Disclaimer
 
-TabVault is an independent browser extension and is not affiliated with, endorsed by, or officially connected to Google LLC, Google Chrome, Google Drive, or any third-party bookmarking or session-management tools whose export formats are supported for user import (such as OneTab, Session Buddy, Tab Session Manager, Tablerone, TabXpert, Pocket, Pinboard, or Linkwarden). All product and company names are trademarks™ or registered® trademarks of their respective holders.
+TabVault is an independent browser extension and is not affiliated with, endorsed by, or officially connected to Google LLC, Google Chrome, Google Drive, or any third-party bookmarking or session-management tools whose standard export formats are supported for user import. All product and company names are trademarks™ or registered® trademarks of their respective holders.
 
 ## 6. Changes to This Policy
 
