@@ -259,6 +259,15 @@ describe("smart save, restore matching, and duplicate tab detection", () => {
     expect(sanitizeSettingsPatch([1, 2, 3])).toEqual({});
   });
 
+  it("sanitizes contextMenuEnabled and contextMenuItems patches", () => {
+    const clean = sanitizeSettingsPatch({
+      contextMenuEnabled: false,
+      contextMenuItems: ["saveSnapshot", "openSidePanel", "invalidItem", "saveSnapshot", 123],
+    });
+    expect(clean.contextMenuEnabled).toBe(false);
+    expect(clean.contextMenuItems).toEqual(["saveSnapshot", "openSidePanel"]);
+  });
+
   it("generates unique IDs via uid()", () => {
     const ids = new Set(Array.from({ length: 100 }, () => uid()));
     expect(ids.size).toBe(100);

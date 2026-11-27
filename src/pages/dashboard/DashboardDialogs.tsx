@@ -1,20 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Download, Lock, ShieldCheck, X } from "lucide-react";
 import { BackupPasswordField } from "../../components/BackupPasswordField.tsx";
-import { Button, Input, Select, Switch, cn } from "../../components/ui.tsx";
+import { ConfirmDialog } from "../../components/ConfirmDialog.tsx";
+import { Button, Input, Select, Switch, Textarea, cn } from "../../components/ui.tsx";
 import type { DashboardController } from "../../hooks/useDashboardController.ts";
+import { COLLECTION_COLORS } from "../../shared/defaults.ts";
 import { isEncryptedBackupText } from "../../shared/password-strength.ts";
 
-export const COLLECTION_COLORS = [
-  "#0EA5E9",
-  "#10B981",
-  "#F59E0B",
-  "#6366F1",
-  "#EF4444",
-  "#14B8A6",
-  "#8B5CF6",
-  "#64748B",
-];
+export { COLLECTION_COLORS };
 
 export function DashboardDialogs({ ctrl }: { ctrl: DashboardController }) {
   const isEncryptedImport = isEncryptedBackupText(ctrl.importText);
@@ -205,7 +198,7 @@ export function DashboardDialogs({ ctrl }: { ctrl: DashboardController }) {
               </Dialog.Close>
             </div>
             <Dialog.Description className="sr-only">
-              Export all sessions or import sessions from JSON, Bookmarks HTML, or URL text.
+              Export all sessions or import from Workona, Toby, OneTab, Session Buddy, JSON, Bookmarks HTML, or URL text.
             </Dialog.Description>
 
             <div className="space-y-2">
@@ -221,21 +214,24 @@ export function DashboardDialogs({ ctrl }: { ctrl: DashboardController }) {
             </div>
 
             <form onSubmit={(e) => void ctrl.handleImportSubmit(e)} className="space-y-3 pt-3 border-t border-[var(--st-border)]">
-              <label className="text-[12px] font-semibold block">
+              <label htmlFor="st-import-file" className="text-[12px] font-semibold block">
                 Import from file or pasted text (JSON, Bookmarks HTML, or URL list)
               </label>
               <input
+                id="st-import-file"
                 type="file"
                 accept=".json,.html,.htm,.txt,.csv"
                 onChange={ctrl.handleImportFilePick}
                 className="text-[12px] file:mr-3 file:h-8 file:px-3 file:rounded-md file:border file:border-[var(--st-border)] file:bg-[var(--st-subtle)] file:text-[12px] file:font-medium cursor-pointer"
               />
-              <textarea
+              <Textarea
+                id="st-import-text"
+                aria-label="Exported backup text or list of URLs"
                 value={ctrl.importText}
                 onChange={(e) => ctrl.setImportText(e.target.value)}
                 rows={5}
                 placeholder="Or paste exported backup text or a list of URLs…"
-                className="w-full rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] p-2.5 text-[12px] focus:outline-none focus:border-[var(--st-accent)]"
+                className="text-[12px]"
               />
               {isEncryptedImport && (
                 <div className="flex items-start gap-2 rounded-md border border-[var(--st-accent)]/30 bg-[var(--st-accent-soft)] px-2.5 py-2 text-[12px] text-[var(--st-ink)]">
@@ -246,8 +242,9 @@ export function DashboardDialogs({ ctrl }: { ctrl: DashboardController }) {
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-[12px] font-medium block">Backup password</label>
+                <label htmlFor="st-import-password" className="text-[12px] font-medium block">Backup password</label>
                 <BackupPasswordField
+                  id="st-import-password"
                   mode="unlock"
                   value={ctrl.importPassword}
                   onChange={ctrl.setImportPassword}
@@ -271,6 +268,8 @@ export function DashboardDialogs({ ctrl }: { ctrl: DashboardController }) {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <ConfirmDialog request={ctrl.confirmRequest} onResolve={ctrl.resolveConfirm} />
     </>
   );
 }

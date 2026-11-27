@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   AlertCircle,
@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Folder,
   FolderPlus,
+  Heart,
   HelpCircle,
   History,
   Layers,
@@ -26,9 +27,8 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { BackupPermissionBanner, BuyMeACoffeeButton, FeedbackDialog, HeaderAccountButton, QuickIntervalButton } from "../../components/HeaderExtras.tsx";
+import { BackupPermissionBanner, BuyMeACoffeeButton, FeedbackDialog, HeaderAccountButton, HeaderSleepButton, QuickIntervalButton } from "../../components/HeaderExtras.tsx";
 import { EmptyStateCard, OnboardingCard } from "../../components/OnboardingCard.tsx";
-import { BackupsPanel } from "./BackupsPanel.tsx";
 import { Button, Checkbox, DashboardSkeleton, GlobalTooltip, Input, Select, TabFavicon, cn } from "../../components/ui.tsx";
 import {
   type DateFilter,
@@ -42,10 +42,12 @@ import { formatAgo, formatTimestamp, plural } from "../../shared/format.ts";
 import { useOnboarding } from "../../shared/onboarding.ts";
 import { sendBg } from "../../shared/rpc.ts";
 import type { SnapshotMeta } from "../../shared/types.ts";
-import { OptionsApp } from "../options/OptionsApp.tsx";
 import { DashboardDialogs } from "./DashboardDialogs.tsx";
 import { DashboardInspector } from "./DashboardInspector.tsx";
 import { GROUP_DOT_COLORS, groupWindowTabs, historyGroupLabel } from "./dashboardUtils.tsx";
+
+const OptionsApp = lazy(() => import("../options/OptionsApp.tsx").then((m) => ({ default: m.OptionsApp })));
+const BackupsPanel = lazy(() => import("./BackupsPanel.tsx").then((m) => ({ default: m.BackupsPanel })));
 
 export function DashboardApp() {
   const ctrl = useDashboardController();
@@ -74,6 +76,12 @@ export function DashboardApp() {
     return () => chrome.runtime?.onMessage?.removeListener(onMsg);
   }, []);
   const [staleOnly, setStaleOnly] = useState(false);
+  const [showRecentlyClosed, setShowRecentlyClosed] = useState(false);
+  const [recentlyClosed, setRecentlyClosed] = useState<{
+    granted: boolean;
+    items: Array<{ sessionId: string; lastModified: number; isWindow: boolean; title: string; url: string; tabCount: number }>;
+  } | null>(null);
+  const [loadingClosed, setLoadingClosed] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<"general" | "tabs" | "backups" | "data">("general");
   const [guideOpen, setGuideOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -96,6 +104,45 @@ export function DashboardApp() {
   useEffect(() => {
     setStaleOnly(false);
   }, [ctrl.section]);
+
+  const [showWelcome, setShowWelcome] = useState(
+    () => new URLSearchParams(window.location.search).get("welcome") === "1"
+  );
+
+  useEffect(() => {
+    chrome?.storage?.local
+      ?.get("showWelcomeBanner")
+      .then((res) => {
+        if (res.showWelcomeBanner) setShowWelcome(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const dismissWelcome = () => {
+    setShowWelcome(false);
+    chrome?.storage?.local?.set({ showWelcomeBanner: false }).catch(() => {});
+  };
+
+  const loadRecentlyClosed = async () => {
+    setLoadingClosed(true);
+    try {
+      const res = await sendBg<{
+        granted: boolean;
+        items: Array<{ sessionId: string; lastModified: number; isWindow: boolean; title: string; url: string; tabCount: number }>;
+      }>("listRecentlyClosed");
+      setRecentlyClosed(res);
+    } catch {
+      setRecentlyClosed({ granted: false, items: [] });
+    } finally {
+      setLoadingClosed(false);
+    }
+  };
+
+  useEffect(() => {
+    if (ctrl.section === "auto" && showRecentlyClosed) {
+      void loadRecentlyClosed();
+    }
+  }, [ctrl.section, showRecentlyClosed]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -242,7 +289,11 @@ export function DashboardApp() {
             <Button
               variant="ghost"
               className="h-7 px-2.5 text-xs"
-              onClick={() => void sendBg("dismissRecovery").then(ctrl.loadAll)}
+              onClick={() =>
+                void sendBg("dismissRecovery")
+                  .then(ctrl.loadAll)
+                  .catch((err) => ctrl.notify(String((err as Error)?.message || err)))
+              }
             >
               Dismiss
             </Button>
@@ -257,7 +308,7 @@ export function DashboardApp() {
         </div>
       )}
 
-      <BackupPermissionBanner onToast={ctrl.notify} />
+      {!showWelcome && <BackupPermissionBanner onToast={ctrl.notify} />}
 
       {/* Pinned Top Bar */}
       <header className="min-h-[52px] px-3 sm:px-4 py-1.5 bg-[var(--st-surface)] border-b border-[var(--st-border)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 shrink-0">
@@ -290,6 +341,7 @@ export function DashboardApp() {
         </div>
 
         <div className="order-2 md:order-3 flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <HeaderSleepButton state={state} onRefresh={ctrl.loadAll} onToast={ctrl.notify} />
           <QuickIntervalButton state={state} onRefresh={ctrl.loadAll} onToast={ctrl.notify} />
           <HeaderAccountButton state={state} onRefresh={ctrl.loadAll} onToast={ctrl.notify} />
           <BuyMeACoffeeButton />
@@ -391,7 +443,7 @@ export function DashboardApp() {
         className={cn(
           "flex-1 min-h-0 flex flex-col md:grid md:grid-cols-[248px_minmax(0,1fr)]",
           (activeSection === "named" || activeSection === "auto" || activeSection === "collections") &&
-            "lg:grid-cols-[248px_minmax(0,1fr)_340px] xl:grid-cols-[256px_minmax(0,1fr)_420px]"
+            "lg:grid-cols-[248px_minmax(0,1fr)_340px] xl:grid-cols-[248px_minmax(0,1fr)_420px]"
         )}
       >
         {/* Left Rail */}
@@ -558,9 +610,42 @@ export function DashboardApp() {
             </button>
           </nav>
 
-          <div className="hidden md:block pt-2 border-t border-[var(--st-border)] shrink-0">
+          <div className="hidden md:block pt-2 border-t border-[var(--st-border)] shrink-0 space-y-1">
             <div className="px-2.5 py-1 text-[11px] text-[var(--st-muted)] truncate">
               {state?.lastSaveAt ? `Auto-saved ${formatAgo(state.lastSaveAt)}` : "Auto-save ready"}
+            </div>
+            <div
+              className="px-2.5 py-1 flex items-center gap-1.5 text-[11px] text-[var(--st-muted)]"
+            >
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span>Made with</span>
+                <Heart className="w-3 h-3 text-[var(--st-danger)] fill-[var(--st-danger)] shrink-0" aria-label="love" />
+                <span>by</span>
+              </span>
+              <span className="relative inline-flex items-baseline font-black tracking-tight text-[12px] text-[var(--st-ink)] select-none pt-1">
+                <span className="inline-block -rotate-[6deg] leading-none">94</span>
+                <span className="relative inline-block -rotate-[8deg] leading-none -ml-[1px]">
+                  ARTS
+                  <svg
+                    viewBox="0 0 40 28"
+                    aria-hidden="true"
+                    className="overflow-visible absolute -top-[8px] left-[3px] w-[11px] rotate-[6deg] text-[var(--st-ink)] group-hover:text-[var(--st-accent)] transition-colors"
+                  >
+                    <path
+                      d="M4 24 6.5 8.5l7.8 8.2L20 5l5.7 11.7 7.8-8.2L36 24Z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3.2"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                    <circle cx="6.5" cy="6" r="2.4" fill="currentColor" />
+                    <circle cx="20" cy="2.6" r="2.4" fill="currentColor" />
+                    <circle cx="33.5" cy="6" r="2.4" fill="currentColor" />
+                  </svg>
+                  <span className="ml-[1px] align-top text-[7px] font-semibold leading-none">®</span>
+                </span>
+              </span>
             </div>
           </div>
         </aside>
@@ -568,7 +653,9 @@ export function DashboardApp() {
         {/* Center Pane (Pinned Header + Independent Scrollable List) */}
         <main id="main-content" tabIndex={-1} className="flex flex-col min-h-0 min-w-0 overflow-hidden bg-[var(--st-bg)] focus:outline-none">
           {activeSection === "settings" ? (
-            <OptionsApp embedded initialCategory={settingsCategory} />
+            <Suspense fallback={<div className="p-6 text-[13px] text-[var(--st-muted)]">Loading settings…</div>}>
+              <OptionsApp embedded initialCategory={settingsCategory} />
+            </Suspense>
           ) : (
             <>
               {/* Pinned Pane Header */}
@@ -677,7 +764,7 @@ export function DashboardApp() {
                     <div>
                       <h1 className="text-[16px] font-bold tracking-tight">Saved Sessions</h1>
                       <p className="text-[12px] text-[var(--st-muted)]">
-                        Named sessions you intentionally kept
+                        Point-in-time window snapshots you intentionally kept
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -717,7 +804,7 @@ export function DashboardApp() {
                     <div>
                       <h1 className="text-[16px] font-bold tracking-tight">Collections</h1>
                       <p className="text-[12px] text-[var(--st-muted)]">
-                        Reusable project stacks and tab groups
+                        Persistent, editable tab folders &amp; project workspaces
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -768,16 +855,25 @@ export function DashboardApp() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Select
-                        aria-label="Filter history by date"
-                        value={ctrl.dateFilter}
-                        onChange={(e) => ctrl.setDateFilter(e.target.value as DateFilter)}
+                      <Button
+                        variant={showRecentlyClosed ? "primary" : "outline"}
+                        onClick={() => setShowRecentlyClosed((v) => !v)}
+                        title="View and reopen recently closed tabs and windows from Chrome"
                       >
-                        <option value="all">All time</option>
-                        <option value="today">Today</option>
-                        <option value="week">Last 7 days</option>
-                        <option value="month">Last 30 days</option>
-                      </Select>
+                        Recently Closed
+                      </Button>
+                      {!showRecentlyClosed && (
+                        <Select
+                          aria-label="Filter history by date"
+                          value={ctrl.dateFilter}
+                          onChange={(e) => ctrl.setDateFilter(e.target.value as DateFilter)}
+                        >
+                          <option value="all">All time</option>
+                          <option value="today">Today</option>
+                          <option value="week">Last 7 days</option>
+                          <option value="month">Last 30 days</option>
+                        </Select>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -836,16 +932,24 @@ export function DashboardApp() {
 
               {/* Scrollable List Area */}
               <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden scroll-thin p-4 space-y-3">
-                {onboarding.shouldShow && activeSection === "open" && !ctrl.searchQuery.trim() && (
+                {(onboarding.shouldShow || showWelcome) && activeSection === "open" && !ctrl.searchQuery.trim() && (
                   <OnboardingCard
                     variant="wide"
                     autoSaveIntervalMin={settings.autoSaveIntervalMin}
                     progress={onboarding.progress}
-                    onDismiss={onboarding.dismiss}
+                    onDismiss={() => {
+                      onboarding.dismiss();
+                      dismissWelcome();
+                    }}
                     onOpenGuide={() => {
                       onboarding.markGuideExplored();
                       setGuideOpen(true);
                     }}
+                    showSetupBar={showWelcome}
+                    driveConnected={Boolean(state?.driveConnected)}
+                    driveEmail={state?.driveEmail}
+                    onRefresh={ctrl.loadAll}
+                    onToast={ctrl.notify}
                     steps={[
                       {
                         id: "save-session",
@@ -866,7 +970,7 @@ export function DashboardApp() {
                       {
                         id: "enable-tab-sleep",
                         title: "Enable Tab Sleep (save RAM)",
-                        description: "Automatically discard idle background tabs to keep Chrome fast.",
+                        description: "Automatically sleep idle background tabs to free memory and keep Chrome fast.",
                         done: onboarding.progress.tabSleepEnabled,
                         actionLabel: "Enable",
                         onAction: () =>
@@ -893,8 +997,11 @@ export function DashboardApp() {
                 )}
                 {ctrl.searchQuery.trim() ? (
                   !filteredSearchHits || filteredSearchHits.length === 0 ? (
-                    <div className="py-12 text-center text-[13px] text-[var(--st-muted)]">
-                      No matching tabs found.
+                    <div className="py-12 text-center space-y-2">
+                      <div className="text-[13px] text-[var(--st-muted)]">No matching tabs found.</div>
+                      <Button size="sm" variant="outline" onClick={() => ctrl.setSearchQuery("")}>
+                        Clear search
+                      </Button>
                     </div>
                   ) : (
                     <div className="rounded-lg border border-[var(--st-border)] bg-[var(--st-surface)] divide-y divide-[var(--st-border)]">
@@ -908,7 +1015,9 @@ export function DashboardApp() {
                             onClick={() =>
                               hit.source === "open"
                                 ? void ctrl.handleFocusOpenTab(Number(hit.id) || undefined, hit.tab.url, hit.tab.id)
-                                : void sendBg("openUrl", { url: hit.tab.url })
+                                : void sendBg("openUrl", { url: hit.tab.url }).catch((err) =>
+                                    ctrl.notify(String((err as Error)?.message || err))
+                                  )
                             }
                             className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
                           >
@@ -1201,7 +1310,7 @@ export function DashboardApp() {
                       <EmptyStateCard
                         icon={<Layers className="w-5 h-5" />}
                         title="No saved sessions yet"
-                        description="Save your open windows to create a named restore point that never expires, or import existing tabs from OneTab, JSON, or Bookmarks HTML."
+                        description="Save your open windows to create a named restore point that never expires, or import existing tabs from Workona, Toby, OneTab, Session Buddy, JSON, or Bookmarks HTML."
                         primaryLabel="Save All Windows"
                         onPrimary={() => void ctrl.openSaveDialog(null)}
                         secondaryLabel="Import Sessions"
@@ -1357,10 +1466,75 @@ export function DashboardApp() {
                         })}
                     </div>
                   )
+                ) : activeSection === "auto" && showRecentlyClosed ? (
+                  loadingClosed && !recentlyClosed ? (
+                    <div className="py-12 text-center text-[13px] text-[var(--st-muted)]">
+                      Loading recently closed tabs…
+                    </div>
+                  ) : !recentlyClosed?.granted ? (
+                    <EmptyStateCard
+                      icon={<History className="w-5 h-5" />}
+                      title="Allow Recently Closed Tabs"
+                      description="Grant the optional Sessions permission so TabVault can list and reopen individual tabs or windows you recently closed."
+                      primaryLabel="Allow Recently Closed"
+                      onPrimary={async () => {
+                        const ok = chrome.permissions?.request
+                          ? await chrome.permissions.request({ permissions: ["sessions"] }).catch(() => false)
+                          : false;
+                        if (ok) {
+                          await loadRecentlyClosed();
+                        } else {
+                          ctrl.notify("Sessions permission is needed to view recently closed tabs.");
+                        }
+                      }}
+                    />
+                  ) : recentlyClosed.items.length === 0 ? (
+                    <EmptyStateCard
+                      icon={<History className="w-5 h-5" />}
+                      title="No recently closed tabs"
+                      description="Tabs and windows you close in Chrome will appear here for quick 1-click reopening."
+                    />
+                  ) : (
+                    <div className="space-y-1.5">
+                      {recentlyClosed.items.map((item) => (
+                        <div
+                          key={item.sessionId}
+                          className="px-3.5 py-2.5 rounded-lg border border-[var(--st-border)] bg-[var(--st-surface)] flex items-center justify-between gap-3"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            {item.url ? <TabFavicon url={item.url} title={item.title} /> : <Monitor className="w-4 h-4 text-[var(--st-muted)] shrink-0" />}
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[13px] font-semibold truncate">{item.title}</div>
+                              <div className="text-[11.5px] text-[var(--st-muted)] truncate tabular-nums">
+                                {item.url ? `${formatTabDisplayUrl(item.url, urlMode)} · ` : ""}
+                                {formatTimestamp(item.lastModified, tsMode)}
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            onClick={async () => {
+                              try {
+                                await sendBg("restoreRecentlyClosed", { sessionId: item.sessionId });
+                                ctrl.notify("Reopened closed item.");
+                                await loadRecentlyClosed();
+                                await ctrl.loadAll();
+                              } catch (err) {
+                                ctrl.notify(String((err as Error)?.message || err));
+                              }
+                            }}
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Reopen
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )
                 ) : activeSection === "auto" ? (
                   visibleSnapshots.length === 0 ? (
                     <div className="py-12 text-center text-[13px] text-[var(--st-muted)]">
-                      No auto-saves recorded yet.
+                      No auto-saves yet. TabVault saves your open windows automatically as you browse.
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -1427,18 +1601,20 @@ export function DashboardApp() {
                     </div>
                   )
                 ) : (
-                  <BackupsPanel
-                    state={state}
-                    settings={settings}
-                    tsMode={tsMode}
-                    driveSyncPassword={ctrl.driveSyncPassword}
-                    onReload={ctrl.loadAll}
-                    onNotify={ctrl.notify}
-                    onConfigureDrive={() => {
-                      setSettingsCategory("backups");
-                      ctrl.setSection("settings");
-                    }}
-                  />
+                  <Suspense fallback={<div className="p-4 text-[13px] text-[var(--st-muted)]">Loading backups…</div>}>
+                    <BackupsPanel
+                      state={state}
+                      settings={settings}
+                      tsMode={tsMode}
+                      driveSyncPassword={ctrl.driveSyncPassword}
+                      onReload={ctrl.loadAll}
+                      onNotify={ctrl.notify}
+                      onConfigureDrive={() => {
+                        setSettingsCategory("backups");
+                        ctrl.setSection("settings");
+                      }}
+                    />
+                  </Suspense>
                 )}
               </div>
             </>
@@ -1499,7 +1675,7 @@ export function DashboardApp() {
                 <ul className="list-disc pl-4 space-y-1 text-[var(--st-muted)]">
                   <li>
                     <strong className="text-[var(--st-ink)]">Auto-Save &amp; History:</strong> Saves open windows every{" "}
-                    {settings.autoSaveIntervalMin} min and on window close (with 70% shrink protection).
+                    {settings.autoSaveIntervalMin} min and on window close (protects large sessions if most tabs were closed).
                   </li>
                   <li>
                     <strong className="text-[var(--st-ink)]">Crash Recovery:</strong> Alerts you automatically if tabs didn&apos;t reopen on startup.
@@ -1508,31 +1684,50 @@ export function DashboardApp() {
                     <strong className="text-[var(--st-ink)]">Smart Restore:</strong> Focuses matching open windows and skips already-open tabs instead of duplicating them.
                   </li>
                   <li>
-                    <strong className="text-[var(--st-ink)]">Tab Groups &amp; Lazy Load:</strong> Preserves Chrome Tab Groups and discards background tabs on large restores to save RAM.
+                    <strong className="text-[var(--st-ink)]">Tab Groups &amp; Lazy Load:</strong> Preserves Chrome Tab Groups and wait-loads background tabs on large restores to save RAM.
+                  </li>
+                  <li>
+                    <strong className="text-[var(--st-ink)]">Local &amp; Cloud Backups:</strong> Daily local backups (after granting Downloads access) and Google Drive sync are ready in <em>Backups &amp; Sync</em>.
                   </li>
                 </ul>
               </div>
 
               <div className="p-3 rounded-lg border border-[var(--st-border)] space-y-1.5">
-                <div className="font-semibold text-[13px]">Optional (turn on when you want them)</div>
+                <div className="font-semibold text-[13px]">Quick controls &amp; optional tools</div>
                 <ul className="list-disc pl-4 space-y-1 text-[var(--st-muted)]">
                   <li>
-                    <strong className="text-[var(--st-ink)]">Automatic Tab Sleep:</strong> Off by default; use{" "}
-                    <strong>Sleep Idle</strong> anytime or enable automatic sleeping in <em>Tab Sleep &amp; Groups</em>.
+                    <strong className="text-[var(--st-ink)]">One-Click Tab Sleep:</strong> Toggle idle tab sleeping anytime with the{" "}
+                    <strong>Moon</strong> button in the header, or customize timers and rules in <em>Tab Sleep &amp; Groups</em>.
                   </li>
                   <li>
-                    <strong className="text-[var(--st-ink)]">Local &amp; Google Drive Backups:</strong> Off by default; configure in <em>Backups &amp; Sync</em>.
+                    <strong className="text-[var(--st-ink)]">Group by Domain:</strong> Organize any open window into colored Chrome Tab Groups by website in one click (click again to ungroup).
                   </li>
                   <li>
                     <strong className="text-[var(--st-ink)]">Bookmarks Bar Pinning:</strong> Click <strong>Pin Bar</strong> on any Saved Session or Collection for 1-click multi-window restore.
                   </li>
+                  <li>
+                    <strong className="text-[var(--st-ink)]">Drag &amp; Drop + Undo/Redo:</strong> Drag open tabs onto Collections, drag to reorder tabs in Saved Sessions or Collections, and use header <strong>Undo / Redo</strong> anytime.
+                  </li>
+                  <li>
+                    <strong className="text-[var(--st-ink)]">Import &amp; Export:</strong> Move data via JSON, Bookmarks HTML, CSV, Markdown, or plain URL lists (with optional password encryption).
+                  </li>
+                  <li>
+                    <strong className="text-[var(--st-ink)]">Feedback &amp; Updates:</strong> Send bugs or feature ideas directly from the sidebar, and check for updates in <em>Settings → General</em>.
+                  </li>
                 </ul>
               </div>
 
-              <div className="text-[11.5px] text-[var(--st-muted)]">
-                Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">Ctrl+K</kbd> or{" "}
-                <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">/</kbd> to search everything, or type{" "}
-                <code className="px-1 py-0.5 rounded bg-[var(--st-subtle)]">st</code> in Chrome&apos;s address bar.
+              <div className="text-[11.5px] text-[var(--st-muted)] space-y-1">
+                <div>
+                  Search: <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">Ctrl+K</kbd> or{" "}
+                  <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">/</kbd> · Address bar:{" "}
+                  <code className="px-1 py-0.5 rounded bg-[var(--st-subtle)]">st</code>
+                </div>
+                <div>
+                  Shortcuts: <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">Alt+Shift+D</kbd> Dashboard ·{" "}
+                  <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">Alt+Shift+S</kbd> Save All ·{" "}
+                  <kbd className="px-1.5 py-0.5 rounded bg-[var(--st-subtle)] border border-[var(--st-border)]">Alt+Shift+W</kbd> Save &amp; Close
+                </div>
               </div>
             </div>
 

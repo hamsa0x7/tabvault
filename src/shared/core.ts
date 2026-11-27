@@ -55,9 +55,10 @@ export function isTrivial(url: string): boolean {
 }
 
 export function matchesWildcard(url: string, pattern: string): boolean {
-  const trimmed = pattern.trim();
+  const trimmed = pattern.trim().slice(0, 512);
   if (!trimmed) return false;
-  const escaped = trimmed.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  const collapsed = trimmed.replace(/\*+/g, "*");
+  const escaped = collapsed.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   try {
     return new RegExp(`^${escaped}$`, "i").test(url);
   } catch {

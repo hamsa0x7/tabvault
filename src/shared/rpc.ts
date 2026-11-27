@@ -24,7 +24,7 @@ export interface RpcMap {
     res: SnapshotMeta;
   };
   promoteSnapshot: { req: { id: string; name?: string }; res: SnapshotMeta };
-  updateSnapshot: { req: { id: string; patch: Partial<SessionSnapshot> }; res: SnapshotMeta };
+  updateSnapshot: { req: { id: string; patch: Partial<SessionSnapshot> }; res: SessionSnapshot };
   deduplicateSnapshot: { req: { id: string }; res: { removed: number; tabCount: number } };
   deleteSnapshots: { req: { ids: string[] }; res: boolean };
   mergeSnapshots: { req: { ids: string[]; name?: string }; res: SnapshotMeta };
@@ -103,6 +103,21 @@ export interface RpcMap {
   storageStats: { req: undefined; res: { extensionLocalBytes: number | null; indexedDbBytes: number | null } };
   compressAllFavicons: { req: undefined; res: { updatedSnapshots: number; updatedCollections: number } };
   importReadingList: { req: undefined; res: { imported: number; collectionId: string | null } };
+  listRecentlyClosed: {
+    req: undefined;
+    res: {
+      granted: boolean;
+      items: Array<{
+        sessionId: string;
+        lastModified: number;
+        isWindow: boolean;
+        title: string;
+        url: string;
+        tabCount: number;
+      }>;
+    };
+  };
+  restoreRecentlyClosed: { req: { sessionId: string }; res: { ok: boolean } };
 }
 
 export type RpcHandlerMap = {
@@ -127,7 +142,7 @@ export async function sendBg<T = unknown>(cmd: keyof RpcMap, payload: Record<str
     | { ok: true; r: T }
     | { ok: false; error: string }
     | undefined;
-  if (!res) throw new Error("No response from background service");
-  if (!res.ok) throw new Error(res.error || "Operation failed");
+  if (!res) throw new Error("TabVault's background service didn't respond. Try again or reload the extension.");
+  if (!res.ok) throw new Error(res.error || "Something went wrong. Please try again.");
   return res.r;
 }

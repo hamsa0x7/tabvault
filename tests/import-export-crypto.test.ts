@@ -165,6 +165,86 @@ describe("import & export interoperability", () => {
     expect(urls.sessions[0].windows[0].tabs).toHaveLength(2);
   });
 
+  it("imports Workona workspaces and Toby lists as collections", () => {
+    const workonaJson = JSON.stringify({
+      Workspaces: {
+        ws1: {
+          title: "Website Redesign",
+          tabs: {
+            "0": { title: "Figma", url: "https://figma.com/file/123" },
+            "1": { title: "Docs", url: "https://docs.example.com" },
+          },
+          resources: {
+            "0": { title: "Spec Doc", url: "https://spec.example.com", description: "Q4 spec" },
+            "1": { title: "Duplicate Tab", url: "https://docs.example.com" },
+          },
+        },
+      },
+    });
+    const workonaRes = detectAndParseImport(workonaJson);
+    expect(workonaRes.source).toBe("workona");
+    expect(workonaRes.sessions).toHaveLength(0);
+    expect(workonaRes.collections).toHaveLength(1);
+    expect(workonaRes.collections?.[0].title).toBe("Website Redesign");
+    expect(workonaRes.collections?.[0].items.map((i) => i.url)).toEqual([
+      "https://figma.com/file/123",
+      "https://docs.example.com",
+      "https://spec.example.com",
+    ]);
+    expect(workonaRes.collections?.[0].items[2].notes).toBe("Q4 spec");
+
+    const tobyJson = JSON.stringify({
+      lists: [
+        {
+          title: "Research Reading",
+          cards: [
+            {
+              title: "Original Title",
+              customTitle: "Custom Card Title",
+              url: "https://toby-card.example/1",
+              description: "Must read",
+              tags: ["research", "ux"],
+            },
+          ],
+        },
+      ],
+    });
+    const tobyRes = detectAndParseImport(tobyJson);
+    expect(tobyRes.source).toBe("toby");
+    expect(tobyRes.sessions).toHaveLength(0);
+    expect(tobyRes.collections).toHaveLength(1);
+    expect(tobyRes.collections?.[0].title).toBe("Research Reading");
+    expect(tobyRes.collections?.[0].tags).toEqual(["research", "ux"]);
+    expect(tobyRes.collections?.[0].items[0].title).toBe("Custom Card Title");
+    expect(tobyRes.collections?.[0].items[0].notes).toBe("Must read");
+
+    const spacesJson = JSON.stringify({
+      exportVersion: "1.0",
+      sessions: [
+        {
+          sessionId: "sess_123",
+          name: "Spaces Project",
+          createdAt: 1_700_000_000_000,
+          windows: [{ windowId: 101, tabs: [{ title: "Spaces Tab", url: "https://spaces.example/1" }] }],
+        },
+      ],
+    });
+    const spacesRes = detectAndParseImport(spacesJson);
+    expect(spacesRes.source).toBe("spaces");
+    expect(spacesRes.sessions[0].name).toBe("Spaces Project");
+    expect(spacesRes.sessions[0].windows[0].tabs[0].url).toBe("https://spaces.example/1");
+
+    const clusterJson = JSON.stringify({
+      exportSource: "cluster",
+      savedWindows: [
+        { name: "Cluster Win", tabs: [{ title: "Cluster Tab", url: "https://cluster.example/1" }] },
+      ],
+    });
+    const clusterRes = detectAndParseImport(clusterJson);
+    expect(clusterRes.source).toBe("cluster");
+    expect(clusterRes.sessions[0].windows[0].tabs[0].url).toBe("https://cluster.example/1");
+  });
+
   it("rejects non-restorable schemes in URL list / OneTab imports", () => {
     const mixed = detectAndParseImport(
       "javascript://alert(1)\nfile:///etc/passwd\ndata://text/html,hi\nhttps://safe.example/page"

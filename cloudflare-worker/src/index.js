@@ -5,18 +5,45 @@
  *  - GET  /releases/latest : Fetches latest GitHub Release metadata for update checks
  */
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+function corsHeaders(env) {
+  return {
+    "Access-Control-Allow-Origin": (env && env.ALLOWED_ORIGIN) || "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
 
-function jsonResponse(data, status = 200) {
+const FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
+const MAX_FEEDBACK_PER_WINDOW = 5;
+const feedbackHitsByIp = new Map();
+
+function checkFeedbackRateLimit(ip) {
+  const now = Date.now();
+  const prev = (feedbackHitsByIp.get(ip) || []).filter((ts) => now - ts < FEEDBACK_WINDOW_MS);
+  if (prev.length >= MAX_FEEDBACK_PER_WINDOW) {
+    feedbackHitsByIp.set(ip, prev);
+    const retryAfterSec = Math.max(1, Math.ceil((FEEDBACK_WINDOW_MS - (now - prev[0])) / 1000));
+    return { allowed: false, retryAfterSec };
+  }
+  prev.push(now);
+  feedbackHitsByIp.set(ip, prev);
+  if (feedbackHitsByIp.size > 1000) {
+    for (const [key, list] of feedbackHitsByIp) {
+      const fresh = list.filter((ts) => now - ts < FEEDBACK_WINDOW_MS);
+      if (fresh.length === 0) feedbackHitsByIp.delete(key);
+      else feedbackHitsByIp.set(key, fresh);
+    }
+  }
+  return { allowed: true, retryAfterSec: 0 };
+}
+
+function jsonResponse(data, status = 200, env = null) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
-      ...CORS_HEADERS,
+      "X-Content-Type-Options": "nosniff",
+      ...corsHeaders(env),
     },
   });
 }
@@ -30,10 +57,18 @@ function githubHeaders(token) {
   };
 }
 
+async function fetchUpstream(targetUrl, init = {}) {
+  try {
+    return await fetch(targetUrl, { ...init, signal: AbortSignal.timeout(10_000) });
+  } catch {
+    return null;
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: CORS_HEADERS });
+      return new Response(null, { headers: corsHeaders(env) });
     }
 
     const url = new URL(request.url);
@@ -43,9 +78,12 @@ export default {
       if (!env.GITHUB_TOKEN) {
         return jsonResponse({ error: "GitHub token not configured" }, 500);
       }
-      const ghRes = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      const ghRes = await fetchUpstream(`https://api.github.com/repos/${repo}/releases/latest`, {
         headers: githubHeaders(env.GITHUB_TOKEN),
       });
+      if (!ghRes) {
+        return jsonResponse({ error: "Upstream release check failed" }, 502);
+      }
       if (ghRes.status === 404) {
         return jsonResponse({
           available: false,
@@ -75,19 +113,35 @@ export default {
       if (!env.GITHUB_TOKEN) {
         return jsonResponse({ error: "Feedback service not configured" }, 500);
       }
+      const clientIp = request.headers.get("cf-connecting-ip") || "unknown";
+      const rate = checkFeedbackRateLimit(clientIp);
+      if (!rate.allowed) {
+        return new Response(
+          JSON.stringify({ error: "Too many feedback submissions. Please try again later." }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "X-Content-Type-Options": "nosniff",
+              "Retry-After": String(rate.retryAfterSec),
+              ...corsHeaders(env),
+            },
+          }
+        );
+      }
       const body = await request.json().catch(() => null);
       const title = typeof body?.title === "string" ? body.title.trim() : "";
       const issueBody = typeof body?.body === "string" ? body.body.trim() : "";
       const kind = body?.kind === "recommendation" ? "recommendation" : "issue";
 
-      if (!title || title.length > 200) {
+      if (title.length < 3 || title.length > 200) {
         return jsonResponse({ error: "Invalid title" }, 400);
       }
       if (issueBody.length > 10000) {
         return jsonResponse({ error: "Details too long" }, 400);
       }
 
-      const ghRes = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+      const ghRes = await fetchUpstream(`https://api.github.com/repos/${repo}/issues`, {
         method: "POST",
         headers: {
           ...githubHeaders(env.GITHUB_TOKEN),
@@ -99,6 +153,10 @@ export default {
           labels: [kind === "issue" ? "bug" : "enhancement"],
         }),
       });
+
+      if (!ghRes) {
+        return jsonResponse({ error: "Upstream feedback service unavailable" }, 502);
+      }
 
       if (!ghRes.ok) {
         const errText = await ghRes.text().catch(() => "");
@@ -141,11 +199,14 @@ export default {
       params.set("refresh_token", body.refresh_token);
     }
 
-    const googleRes = await fetch("https://oauth2.googleapis.com/token", {
+    const googleRes = await fetchUpstream("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params,
     });
+    if (!googleRes) {
+      return jsonResponse({ error: "Upstream OAuth service unavailable" }, 502);
+    }
 
     return new Response(await googleRes.text(), {
       status: googleRes.status,

@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useId, useRef, useState } from "react";
 import { Cloud, Database, Moon, Sliders } from "lucide-react";
-import { Input, Select, Switch } from "../../components/ui.tsx";
-import type { Settings } from "../../shared/types.ts";
+import { Input, Select, Switch, Textarea } from "../../components/ui.tsx";
+import type { ContextMenuItemId, Settings } from "../../shared/types.ts";
 
 export type CategoryId = "general" | "tabs" | "backups" | "data";
 
@@ -32,6 +32,32 @@ export const ALL_COPY_FORMATS: Array<{ id: Settings["enabledCopyFormats"][number
   { id: "csv", label: "Spreadsheet" },
   { id: "html", label: "Bookmarks Page" },
   { id: "onetab", label: "Address | Title List" },
+];
+
+export const STANDARD_CONTEXT_MENU_ITEMS: Array<{ id: ContextMenuItemId; label: string; description: string }> = [
+  { id: "saveSnapshot", label: "Save all open windows as session", description: "Capture all open browser windows into a new saved session." },
+  { id: "sendTab", label: "Move this tab to a new collection", description: "Save the current tab into a new collection." },
+  { id: "sendExceptThis", label: "Move all tabs except this tab", description: "Move every other tab in this window into a new collection." },
+  { id: "sendLeft", label: "Move tabs on the left", description: "Move all tabs to the left of the current tab into a new collection." },
+  { id: "sendRight", label: "Move tabs on the right", description: "Move all tabs to the right of the current tab into a new collection." },
+  { id: "sendGroup", label: "Move current tab group", description: "Move all tabs in the active Chrome Tab Group into a new collection." },
+  { id: "sendWindow", label: "Move this window to a new collection", description: "Save all tabs in the current window into a new collection." },
+  { id: "excludeDomain", label: "Exclude this website from TabVault", description: "Add the current site's domain to your ignored URL patterns (webpage right-click)." },
+  { id: "sendTabPrev", label: "Move this tab to previous collection", description: "Submenu to move the current tab into one of your 10 most recent collections." },
+  { id: "sendWinPrev", label: "Move this window to previous collection", description: "Submenu to move the current window into one of your 10 most recent collections." },
+  { id: "openDashboard", label: "Open Dashboard", description: "Open or focus the full TabVault Dashboard." },
+];
+
+export const EXTRA_CONTEXT_MENU_ITEMS: Array<{ id: ContextMenuItemId; label: string; description: string }> = [
+  { id: "openSidePanel", label: "Open Side Panel", description: "Open TabVault's Side Panel in the current browser window." },
+  { id: "sendAllWindows", label: "Move all windows to a new collection", description: "Save tabs from every open window into a new collection." },
+  { id: "nukeAll", label: "Save & close all windows", description: "Save all open windows to a collection and close them." },
+  { id: "saveLink", label: "Save link to a new collection", description: "Appears when right-clicking a link to save that URL directly to a collection." },
+  { id: "suspendTab", label: "Sleep / suspend this tab", description: "Suspend or discard the current webpage tab to free memory (webpage right-click)." },
+  { id: "sleepIdle", label: "Sleep all idle tabs now", description: "Immediately sleep all eligible idle tabs across your browser." },
+  { id: "groupByDomain", label: "Group window tabs by domain", description: "Automatically organize tabs in the current window into domain-based Tab Groups." },
+  { id: "dedupeTabs", label: "Close duplicate open tabs", description: "Find and close duplicate open tabs while keeping pinned and active tabs." },
+  { id: "openSettings", label: "Open Settings", description: "Open TabVault's Settings page to customize options." },
 ];
 
 const SettingRowContext = React.createContext<{ id: string; title: string } | null>(null);
@@ -163,7 +189,7 @@ export function BufferedTextarea({
   };
 
   return (
-    <textarea
+    <Textarea
       {...props}
       value={draft}
       onChange={(e) => {

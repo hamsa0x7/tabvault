@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   Bookmark,
   Download,
+  GitCompare,
   GripVertical,
   Lock,
   Pencil,
@@ -13,7 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Button, Checkbox, Input, Select, TabFavicon, cn } from "../../components/ui.tsx";
+import { Button, Checkbox, Input, Select, TabFavicon, Textarea, cn } from "../../components/ui.tsx";
 import {
   type NavSection,
   flattenCollectionTabs,
@@ -55,6 +56,7 @@ export function DashboardInspector({
   const [editingColHeader, setEditingColHeader] = useState(false);
   const [addingToCol, setAddingToCol] = useState(false);
   const [editingSnapHeader, setEditingSnapHeader] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [dragColItemId, setDragColItemId] = useState<string | null>(null);
   const [dragOverColItemId, setDragOverColItemId] = useState<string | null>(null);
   const [dragSnapTab, setDragSnapTab] = useState<{ winIdx: number; tabIdx: number } | null>(null);
@@ -70,7 +72,34 @@ export function DashboardInspector({
 
   useEffect(() => {
     setEditingSnapHeader(false);
+    setCompareOpen(false);
   }, [ctrl.selectedSnapshotId]);
+
+  const openUrlSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const w of ctrl.openWindows || []) {
+      for (const t of w.tabs || []) set.add(t.url);
+    }
+    return set;
+  }, [ctrl.openWindows]);
+
+  const snapDiffStats = useMemo(() => {
+    if (!ctrl.selectedSnapshot) return { newUrls: [] as string[], openCount: 0 };
+    const seen = new Set<string>();
+    const newUrls: string[] = [];
+    let openCount = 0;
+    for (const w of ctrl.selectedSnapshot.windows || []) {
+      for (const t of w.tabs || []) {
+        if (openUrlSet.has(t.url)) {
+          openCount++;
+        } else if (!seen.has(t.url)) {
+          seen.add(t.url);
+          newUrls.push(t.url);
+        }
+      }
+    }
+    return { newUrls, openCount };
+  }, [ctrl.selectedSnapshot, openUrlSet]);
 
   if (activeSection !== "named" && activeSection !== "auto" && activeSection !== "collections") {
     return null;
@@ -194,6 +223,7 @@ export function DashboardInspector({
                         value={editColTitle}
                         onChange={(e) => setEditColTitle(e.target.value)}
                         placeholder="Collection name..."
+                        aria-label="Collection name"
                         className="flex-1 h-7.5 text-[13px] font-semibold"
                         autoFocus
                       />
@@ -205,14 +235,16 @@ export function DashboardInspector({
                       value={ctrl.editColTags}
                       onChange={(e) => ctrl.setEditColTags(e.target.value)}
                       placeholder="Tags (comma-separated)..."
+                      aria-label="Collection tags"
                       className="w-full h-7 text-[11.5px]"
                     />
-                    <textarea
+                    <Textarea
                       value={ctrl.editColNotes}
                       onChange={(e) => ctrl.setEditColNotes(e.target.value)}
                       rows={2}
                       placeholder="Notes (optional)..."
-                      className="w-full rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] p-2 text-[11.5px] focus:outline-none focus:border-[var(--st-accent)]"
+                      aria-label="Collection notes"
+                      className="p-2 text-[11.5px]"
                     />
                   </form>
                   {ctrl.selectedCollection.kind === "group" && ctrl.folders.length > 0 && (
@@ -288,6 +320,7 @@ export function DashboardInspector({
                     value={addUrlInput}
                     onChange={(e) => setAddUrlInput(e.target.value)}
                     placeholder="Add URL (https://...)..."
+                    aria-label="Add URL to collection"
                     className="flex-1 h-7 text-[11.5px]"
                   />
                   <Button type="submit" variant="outline" className="h-7 px-2 text-[11px]">
@@ -422,7 +455,11 @@ export function DashboardInspector({
                         </span>
                         <button
                           type="button"
-                          onClick={() => void sendBg("openUrl", { url: item.url })}
+                          onClick={() =>
+                            void sendBg("openUrl", { url: item.url }).catch((err) =>
+                              ctrl.notify(String((err as Error)?.message || err))
+                            )
+                          }
                           className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
                         >
                           <TabFavicon url={item.url} title={item.title} />
@@ -521,6 +558,7 @@ export function DashboardInspector({
                             value={ctrl.editingItemNote}
                             onChange={(e) => ctrl.setEditingItemNote(e.target.value)}
                             placeholder="Add note for this link..."
+                            aria-label="Note for this link"
                             className="flex-1 h-7 text-[11.5px]"
                             autoFocus
                           />
@@ -553,7 +591,11 @@ export function DashboardInspector({
                           >
                             <button
                               type="button"
-                              onClick={() => void sendBg("openUrl", { url: item.url })}
+                              onClick={() =>
+                            void sendBg("openUrl", { url: item.url }).catch((err) =>
+                              ctrl.notify(String((err as Error)?.message || err))
+                            )
+                          }
                               className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
                             >
                               <TabFavicon url={item.url} title={item.title} />
@@ -707,6 +749,7 @@ export function DashboardInspector({
                   value={ctrl.editSnapName}
                   onChange={(e) => ctrl.setEditSnapName(e.target.value)}
                   placeholder="Session name..."
+                  aria-label="Session name"
                   className="w-full h-7.5 text-[13px] font-semibold"
                   autoFocus
                 />
@@ -715,6 +758,7 @@ export function DashboardInspector({
                     value={ctrl.editSnapTags}
                     onChange={(e) => ctrl.setEditSnapTags(e.target.value)}
                     placeholder="Tags (comma-separated)"
+                    aria-label="Session tags"
                     className="flex-1 h-7 text-[11.5px]"
                   />
                   <Button type="submit" variant="primary" className="h-7 px-2.5 text-[11px]">
@@ -727,11 +771,50 @@ export function DashboardInspector({
                 <div className="text-[15.5px] font-bold truncate">
                   {ctrl.selectedSnapshot.name || formatTimestamp(ctrl.selectedSnapshot.t, tsMode)}
                 </div>
-                <div className="text-[11.5px] text-[var(--st-muted)] tabular-nums">
-                  {plural(ctrl.selectedSnapshot.windowCount, "window")} ·{" "}
-                  {plural(ctrl.selectedSnapshot.tabCount, "tab")}
-                  {ctrl.selectedSnapshot.tags?.length ? ` · ${ctrl.selectedSnapshot.tags.join(", ")}` : ""}
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <div className="text-[11.5px] text-[var(--st-muted)] tabular-nums truncate">
+                    {plural(ctrl.selectedSnapshot.windowCount, "window")} ·{" "}
+                    {plural(ctrl.selectedSnapshot.tabCount, "tab")}
+                    {ctrl.selectedSnapshot.tags?.length ? ` · ${ctrl.selectedSnapshot.tags.join(", ")}` : ""}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCompareOpen((v) => !v)}
+                    aria-pressed={compareOpen}
+                    title="Compare saved tabs against currently open tabs"
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer shrink-0",
+                      compareOpen
+                        ? "border-[var(--st-accent)] bg-[var(--st-accent-soft)] text-[var(--st-accent)]"
+                        : "border-[var(--st-border)] bg-[var(--st-surface)] text-[var(--st-muted)] hover:text-[var(--st-ink)]"
+                    )}
+                  >
+                    <GitCompare className="w-3 h-3" />
+                    Diff
+                  </button>
                 </div>
+                {compareOpen && (
+                  <div className="mt-2 px-2.5 py-1.5 rounded-md border border-[var(--st-border)] bg-[var(--st-subtle)]/70 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="tabular-nums text-[var(--st-muted)]">
+                      <strong className="text-[var(--st-accent)]">{snapDiffStats.newUrls.length}</strong> new ·{" "}
+                      <strong>{snapDiffStats.openCount}</strong> already open
+                    </span>
+                    {snapDiffStats.newUrls.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          for (const url of snapDiffStats.newUrls) {
+                            void sendBg("openUrl", { url, active: false });
+                          }
+                          ctrl.notify(`Opening ${plural(snapDiffStats.newUrls.length, "new tab")}…`);
+                        }}
+                        className="text-[var(--st-accent)] font-semibold hover:underline cursor-pointer shrink-0"
+                      >
+                        Open {snapDiffStats.newUrls.length} New
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -781,11 +864,11 @@ export function DashboardInspector({
                 })}
               </div>
             ) : (
-              ctrl.selectedSnapshot.windows.map((w, wi) => (
+              (ctrl.selectedSnapshot.windows || []).map((w, wi) => (
                 <div key={wi} className="space-y-1">
                   <div className="flex items-center justify-between text-[11.5px] font-semibold text-[var(--st-muted)] px-1">
                     <span>
-                      Window {wi + 1} · {plural(w.tabs.length, "tab")}
+                      Window {wi + 1} · {plural((w.tabs || []).length, "tab")}
                     </span>
                     <button
                       type="button"
@@ -795,7 +878,7 @@ export function DashboardInspector({
                       Open window
                     </button>
                   </div>
-                  {w.tabs.map((t, ti) => (
+                  {(w.tabs || []).map((t, ti) => (
                     <div
                       key={ti}
                       draggable
@@ -833,13 +916,29 @@ export function DashboardInspector({
                       </span>
                       <button
                         type="button"
-                        onClick={() => void sendBg("openUrl", { url: t.url })}
+                        onClick={() =>
+                          void sendBg("openUrl", { url: t.url }).catch((err) =>
+                            ctrl.notify(String((err as Error)?.message || err))
+                          )
+                        }
                         className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
                       >
                         <TabFavicon url={t.url} title={t.title} />
                         <span className={cn("text-[12.5px] flex-1", settings.truncateTitles ? "truncate" : "break-words")}>
                           {t.title || t.url}
                         </span>
+                        {compareOpen && (
+                          <span
+                            className={cn(
+                              "text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0",
+                              openUrlSet.has(t.url)
+                                ? "bg-[var(--st-subtle)] text-[var(--st-muted)]"
+                                : "bg-[var(--st-accent-soft)] text-[var(--st-accent)]"
+                            )}
+                          >
+                            {openUrlSet.has(t.url) ? "Open" : "New"}
+                          </span>
+                        )}
                       </button>
                       <button
                         type="button"

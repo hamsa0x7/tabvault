@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzMbZxd/T01u1nKrhjh93ssdfZ+9qZzm3mU+hM250zUNV7g6rQXOFv/sH/ubfIXEkfwdAS+A3mhldDRx5BsWEd8V2JjgfxG0XxtLe1pJFCDQ0hAKfYF2ZygwrbehmxJ0t1sz/07U6xYO9Qt8SslTmw6AE1Ch6nbHea41SUAIA1ciI8hHhIGty8rNP5dNd4ev2ugV2w+94OkdYj874+VZFeaRNEWUvn8Cfth2yUirs8+QK44DxJIO4axt4srfLkIH7Y8rmQG0/3MuBHdzuaS8ZD1k9k0Rgs/4QyAZIOA9uugAujiyRRr+OGPER0vrQZbL2IGt0Qrhx+jIXZJnbIbqZMQIDAQAB",
-  "name": "TabVault — Tab & Session Manager",
-  "short_name": "TabVault",
+  "name": "__MSG_extName__",
+  "short_name": "__MSG_extShortName__",
   "version": "1.0.0",
-  "description": "Auto-save every window, tab, and tab group. Recover lost sessions in one click and organize tabs locally or with Google Drive.",
+  "default_locale": "en",
+  "description": "__MSG_extDescription__",
   "minimum_chrome_version": "120",
   "incognito": "spanning",
   "icons": {
@@ -51,7 +52,8 @@
     "bookmarks",
     "identity",
     "scripting",
-    "readingList"
+    "readingList",
+    "sessions"
   ],
   "optional_host_permissions": [
     "https://www.googleapis.com/*",

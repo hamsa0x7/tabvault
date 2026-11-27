@@ -1,0 +1,35 @@
+{
+  "extName": {
+    "message": "TabVault — Tab & Session Manager",
+    "description": "Extension name shown in Chrome Web Store and extension management page"
+  },
+  "extShortName": {
+    "message": "TabVault",
+    "description": "Short extension name"
+  },
+  "extDescription": {
+    "message": "Auto-save every window, tab, and tab group. Recover lost sessions in one click and organize tabs locally or with Google Drive.",
+    "description": "Extension description shown in Chrome Web Store"
+  },
+  "cmdOpenDashboard": {
+    "message": "Open TabVault Dashboard"
+  },
+  "cmdSaveAllWindows": {
+    "message": "Save all open windows as a session"
+  },
+  "cmdCollapseCurrentWindow": {
+    "message": "Save and close current window"
+  },
+  "cmdNukeAllWindows": {
+    "message": "Save and close all windows"
+  },
+  "tabOpen": {
+    "message": "Open"
+  },
+  "tabSessions": {
+    "message": "Sessions"
+  },
+  "tabCollections": {
+    "message": "Collections"
+  }
+}

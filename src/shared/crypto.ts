@@ -59,7 +59,7 @@ export async function encryptPayload(plaintext: string, password: string): Promi
 
 export async function decryptPayload(envelope: EncryptedEnvelope, password: string): Promise<string> {
   if (envelope.format !== "tabvault-encrypted" && envelope.format !== "smarttabber-encrypted") {
-    throw new Error("Unsupported encrypted backup format");
+    throw new Error("This file isn't a supported TabVault encrypted backup.");
   }
   const salt = fromB64(envelope.saltB64);
   const iv = fromB64(envelope.ivB64);

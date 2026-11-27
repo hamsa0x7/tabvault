@@ -67,6 +67,10 @@ export const SOURCE_LABELS: Record<string, string> = {
   pocket: "Pocket",
   pinboard: "Pinboard",
   linkwarden: "Linkwarden",
+  workona: "Workona",
+  toby: "Toby",
+  spaces: "Spaces",
+  cluster: "Cluster",
   urls: "URL List",
 };
 
@@ -157,7 +161,11 @@ export function exportAsMarkdown(snaps: SessionSnapshot[]): string {
 }
 
 export function exportAsCsv(snaps: SessionSnapshot[]): string {
-  const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+  const esc = (v: string) => {
+    const raw = String(v);
+    const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
   const rows = ["session,saved_at,window,title,url,pinned"];
   for (const s of snaps) {
     const sName = s.name || new Date(s.t).toISOString();
@@ -373,6 +381,144 @@ function parseLinkwarden(o: unknown): ImportedSessionInput[] {
   ];
 }
 
+function toRecordList(v: unknown): JsonRecord[] {
+  if (Array.isArray(v)) return asRecords(v);
+  if (isRecord(v)) return asRecords(Object.values(v));
+  return [];
+}
+
+function buildImportedCollection(
+  title: string,
+  items: CollectionItem[],
+  order: number,
+  tags: string[] = []
+): CollectionRecord {
+  const now = Date.now();
+  return {
+    id: uid(),
+    parentFolderId: null,
+    kind: "group",
+    title: title.slice(0, 120) || "Imported Collection",
+    color: "#0B87C9",
+    createdAt: now,
+    updatedAt: now,
+    order,
+    tags,
+    items,
+  };
+}
+
+function parseWorkona(o: unknown): CollectionRecord[] {
+  if (!isRecord(o)) return [];
+  const rawSpaces = o.Workspaces ?? o.workspaces ?? o.spaces;
+  const spaces = toRecordList(rawSpaces);
+  if (!spaces.length) return [];
+
+  const now = Date.now();
+  const cols: CollectionRecord[] = [];
+  spaces.forEach((ws, idx) => {
+    const seenUrls = new Set<string>();
+    const items: CollectionItem[] = [];
+    const pushEntry = (entry: JsonRecord) => {
+      const url = str(entry.url).trim();
+      if (!url || !isRestorable(url) || seenUrls.has(url)) return;
+      seenUrls.add(url);
+      const desc = str(entry.description).trim();
+      items.push({
+        id: uid(),
+        url,
+        title: (str(entry.title) || str(entry.name) || url).slice(0, 500),
+        ...(desc ? { notes: desc.slice(0, 2000) } : {}),
+        addedAt: now,
+      });
+    };
+
+    for (const tab of toRecordList(ws.tabs)) pushEntry(tab);
+    for (const res of toRecordList(ws.resources)) pushEntry(res);
+
+    if (items.length > 0) {
+      cols.push(buildImportedCollection(str(ws.title) || str(ws.name) || `Workona Space ${idx + 1}`, items, idx));
+    }
+  });
+  return cols;
+}
+
+function parseToby(o: unknown): CollectionRecord[] {
+  if (!isRecord(o)) return [];
+  const lists = Array.isArray(o.lists)
+    ? asRecords(o.lists)
+    : Array.isArray(o.workspaces)
+      ? asRecords(o.workspaces).flatMap((w) => (Array.isArray(w.lists) ? asRecords(w.lists) : []))
+      : [];
+  if (!lists.length) return [];
+
+  const now = Date.now();
+  const cols: CollectionRecord[] = [];
+  lists.forEach((list, idx) => {
+    const cards = asRecords(list.cards);
+    const items: CollectionItem[] = [];
+    const seenUrls = new Set<string>();
+    const listTags = new Set<string>();
+
+    for (const card of cards) {
+      const url = str(card.url).trim();
+      if (!url || !isRestorable(url) || seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      const title = (str(card.customTitle) || str(card.title) || url).slice(0, 500);
+      const desc = str(card.description).trim();
+      if (Array.isArray(card.tags)) {
+        for (const t of card.tags) {
+          const clean = String(t).trim();
+          if (clean) listTags.add(clean);
+        }
+      }
+      items.push({
+        id: uid(),
+        url,
+        title,
+        ...(desc ? { notes: desc.slice(0, 2000) } : {}),
+        addedAt: now,
+      });
+    }
+
+    if (items.length > 0) {
+      cols.push(buildImportedCollection(str(list.title) || `Toby List ${idx + 1}`, items, idx, [...listTags]));
+    }
+  });
+  return cols;
+}
+
+function parseSpaces(o: unknown): ImportedSessionInput[] {
+  const rawSessions = Array.isArray(o)
+    ? asRecords(o)
+    : isRecord(o)
+      ? asRecords(o.sessions ?? o.spaces ?? [o])
+      : [];
+  return rawSessions
+    .filter((s) => Boolean(s.windows || s.tabs))
+    .map((s) =>
+      mk(
+        str(s.name) || str(s.title) || "Spaces import",
+        toMs(s.createdAt ?? s.lastAccess ?? s.t),
+        s.windows ? toSavedWindows(s.windows) : [{ tabs: toSavedTabs(s.tabs) }],
+        "spaces"
+      )
+    );
+}
+
+function parseCluster(o: unknown): ImportedSessionInput[] {
+  const rawWindows = Array.isArray(o)
+    ? asRecords(o)
+    : isRecord(o)
+      ? asRecords(o.savedWindows ?? o.windows)
+      : [];
+  const validWins = rawWindows.filter((w) => Array.isArray(w.tabs));
+  if (!validWins.length) return [];
+  const name = isRecord(o) ? str(o.name) || str(o.title) || "Cluster import" : "Cluster import";
+  const ts = isRecord(o) ? toMs(o.createdAt ?? o.updatedAt ?? o.date) : Date.now();
+  return [mk(name, ts, toSavedWindows(validWins), "cluster")];
+}
+
 export function detectAndParseImport(rawText: string): ImportParseResult {
   const text = String(rawText || "").replace(/^\uFEFF/, "").trim();
   if (!text) throw new Error("Empty import input.");
@@ -479,6 +625,34 @@ export function detectAndParseImport(rawText: string): ImportParseResult {
   } else if (Array.isArray(json) && firstArrItem?.href && firstArrItem?.description !== undefined) {
     source = "pinboard";
     sessions = parsePinboard(json);
+  } else if (
+    root &&
+    (root.Workspaces !== undefined || root.workspaces !== undefined || root.spaces !== undefined) &&
+    toRecordList(root.Workspaces ?? root.workspaces ?? root.spaces).some((w) => w.tabs !== undefined || w.resources !== undefined)
+  ) {
+    source = "workona";
+    collections = parseWorkona(json);
+  } else if (
+    root &&
+    (Array.isArray(root.lists) ||
+      (Array.isArray(root.workspaces) && asRecords(root.workspaces).some((w) => Array.isArray(w.lists))))
+  ) {
+    source = "toby";
+    collections = parseToby(json);
+  } else if (
+    root &&
+    (root.exportSource === "cluster" ||
+      Array.isArray(root.savedWindows) ||
+      (Array.isArray(root.windows) && asRecords(root.windows).some((w) => w.windowId !== undefined && Array.isArray(w.tabs))))
+  ) {
+    source = "cluster";
+    sessions = parseCluster(json);
+  } else if (
+    firstOrRoot?.sessionId !== undefined ||
+    (root && root.exportVersion !== undefined && Array.isArray(root.sessions))
+  ) {
+    source = "spaces";
+    sessions = parseSpaces(json);
   } else if (
     root &&
     (Array.isArray(root.collections) || Array.isArray(root.links)) &&

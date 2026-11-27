@@ -1,5 +1,5 @@
 import { countTabs, extractDomain, isRestorable, signature, uid } from "../shared/core.ts";
-import { getAllCollections, getSettings, putSnapshot } from "../shared/db.ts";
+import { getAllCollections, getSettings, putSnapshot, saveSettings } from "../shared/db.ts";
 import { openOrFocusDashboard } from "../shared/format.ts";
 import type { SearchHit, Settings } from "../shared/types.ts";
 import {
@@ -24,7 +24,7 @@ import {
   startupCheck,
   updateBadge,
 } from "./recovery.ts";
-import { checkIdleTabs, markTabActive, removeTabActivity, unsuspendIfPlaceholder } from "./suspender.ts";
+import { checkIdleTabs, markTabActive, removeTabActivity, suspendTab, unsuspendIfPlaceholder } from "./suspender.ts";
 import { checkForUpdates, recordPendingUpdate } from "./updates.ts";
 
 registerStartupCheckHook(() => {
@@ -73,10 +73,19 @@ function setupContextMenus(): Promise<void> {
       if (!chrome.contextMenus) return;
       await chrome.contextMenus.removeAll().catch(() => {});
 
-      const recentCols = (await getAllCollections().catch(() => []))
-        .filter((c) => !c.archived && c.kind !== "folder")
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 10);
+      const s = await getSettings();
+      if (!s.contextMenuEnabled) return;
+
+      const enabled = new Set(s.contextMenuItems);
+      if (enabled.size === 0) return;
+
+      const needRecentCols = enabled.has("sendTabPrev") || enabled.has("sendWinPrev");
+      const recentCols = needRecentCols
+        ? (await getAllCollections().catch(() => []))
+            .filter((c) => !c.archived && c.kind !== "folder")
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, 10)
+        : [];
 
       const createItem = (opts: chrome.contextMenus.CreateProperties) => {
         chrome.contextMenus.create(opts, () => {
@@ -84,47 +93,111 @@ function setupContextMenus(): Promise<void> {
         });
       };
 
-      createItem({ id: "st-save-snapshot", title: "Save all open windows as session", contexts: ["page", "action"] });
-      createItem({ id: "st-send-tab", title: "Move this tab to a new collection", contexts: ["page", "action"] });
-      createItem({ id: "st-send-window", title: "Move this window to a new collection", contexts: ["page", "action"] });
+      if (enabled.has("saveSnapshot")) {
+        createItem({ id: "st-save-snapshot", title: "Save all open windows as session", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendTab")) {
+        createItem({ id: "st-send-tab", title: "Move this tab to a new collection", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendExceptThis")) {
+        createItem({ id: "st-send-except-this", title: "Move all tabs except this tab", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendLeft")) {
+        createItem({ id: "st-send-left", title: "Move tabs on the left", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendRight")) {
+        createItem({ id: "st-send-right", title: "Move tabs on the right", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendGroup")) {
+        createItem({ id: "st-send-group", title: "Move current tab group", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendWindow")) {
+        createItem({ id: "st-send-window", title: "Move this window to a new collection", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendAllWindows")) {
+        createItem({ id: "st-send-all-windows", title: "Move all windows to a new collection", contexts: ["page", "action"] });
+      }
+      if (enabled.has("nukeAll")) {
+        createItem({ id: "st-nuke-all", title: "Save & close all windows", contexts: ["page", "action"] });
+      }
+      if (enabled.has("saveLink")) {
+        createItem({ id: "st-save-link", title: "Save link to a new collection", contexts: ["link"] });
+      }
+      if (enabled.has("suspendTab")) {
+        createItem({ id: "st-suspend-tab", title: "Sleep / suspend this tab", contexts: ["page"] });
+      }
+      if (enabled.has("sleepIdle")) {
+        createItem({ id: "st-sleep-idle", title: "Sleep all idle tabs now", contexts: ["page", "action"] });
+      }
+      if (enabled.has("groupByDomain")) {
+        createItem({ id: "st-group-domain", title: "Group window tabs by domain", contexts: ["page", "action"] });
+      }
+      if (enabled.has("dedupeTabs")) {
+        createItem({ id: "st-dedupe-tabs", title: "Close duplicate open tabs", contexts: ["page", "action"] });
+      }
+      if (enabled.has("excludeDomain")) {
+        createItem({ id: "st-exclude-domain", title: "Exclude this website from TabVault", contexts: ["page"] });
+      }
 
-      createItem({ id: "st-send-tab-prev", title: "Move this tab to previous collection", contexts: ["page", "action"] });
-      createItem({ id: "st-send-win-prev", title: "Move this window to previous collection", contexts: ["page", "action"] });
+      if (enabled.has("sendTabPrev")) {
+        createItem({ id: "st-send-tab-prev", title: "Move this tab to previous collection", contexts: ["page", "action"] });
+      }
+      if (enabled.has("sendWinPrev")) {
+        createItem({ id: "st-send-win-prev", title: "Move this window to previous collection", contexts: ["page", "action"] });
+      }
 
-      if (recentCols.length === 0) {
-        createItem({
-          id: "st-send-tab-none",
-          parentId: "st-send-tab-prev",
-          title: "No collections yet",
-          enabled: false,
-          contexts: ["page", "action"],
-        });
-        createItem({
-          id: "st-send-win-none",
-          parentId: "st-send-win-prev",
-          title: "No collections yet",
-          enabled: false,
-          contexts: ["page", "action"],
-        });
-      } else {
-        for (const col of recentCols) {
-          const label = (col.title || "Untitled collection").replace(/&/g, "&&");
-          createItem({
-            id: `st-send-tab-col:${col.id}`,
-            parentId: "st-send-tab-prev",
-            title: label,
-            contexts: ["page", "action"],
-          });
-          createItem({
-            id: `st-send-win-col:${col.id}`,
-            parentId: "st-send-win-prev",
-            title: label,
-            contexts: ["page", "action"],
-          });
+      if (needRecentCols) {
+        if (recentCols.length === 0) {
+          if (enabled.has("sendTabPrev")) {
+            createItem({
+              id: "st-send-tab-none",
+              parentId: "st-send-tab-prev",
+              title: "No collections yet",
+              enabled: false,
+              contexts: ["page", "action"],
+            });
+          }
+          if (enabled.has("sendWinPrev")) {
+            createItem({
+              id: "st-send-win-none",
+              parentId: "st-send-win-prev",
+              title: "No collections yet",
+              enabled: false,
+              contexts: ["page", "action"],
+            });
+          }
+        } else {
+          for (const col of recentCols) {
+            const label = (col.title || "Untitled collection").replace(/&/g, "&&");
+            if (enabled.has("sendTabPrev")) {
+              createItem({
+                id: `st-send-tab-col:${col.id}`,
+                parentId: "st-send-tab-prev",
+                title: label,
+                contexts: ["page", "action"],
+              });
+            }
+            if (enabled.has("sendWinPrev")) {
+              createItem({
+                id: `st-send-win-col:${col.id}`,
+                parentId: "st-send-win-prev",
+                title: label,
+                contexts: ["page", "action"],
+              });
+            }
+          }
         }
       }
 
-      createItem({ id: "st-open-dashboard", title: "Open Dashboard", contexts: ["page", "action"] });
+      if (enabled.has("openSidePanel")) {
+        createItem({ id: "st-open-sidepanel", title: "Open Side Panel", contexts: ["page", "action"] });
+      }
+      if (enabled.has("openDashboard")) {
+        createItem({ id: "st-open-dashboard", title: "Open Dashboard", contexts: ["page", "action"] });
+      }
+      if (enabled.has("openSettings")) {
+        createItem({ id: "st-open-settings", title: "Open Settings", contexts: ["page", "action"] });
+      }
     })
     .catch(() => {});
   return contextMenuQueue;
@@ -214,13 +287,17 @@ chrome.action?.onClicked?.addListener(async () => {
   }
 });
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   await chrome.storage.local.remove("pendingUpdateVersion").catch(() => {});
   await setupSidePanelBehavior();
   await setupAlarms();
   await setupContextMenus();
   await refreshLiveWindowCache();
   scheduleSave(500);
+  if (details.reason === "install") {
+    await chrome.storage.local.set({ showWelcomeBanner: true }).catch(() => {});
+    await openOrFocusDashboard().catch(() => {});
+  }
 });
 
 chrome.runtime.onUpdateAvailable.addListener(async (details) => {
@@ -385,25 +462,124 @@ async function saveAllWindowsAsSession(s: Settings, windowId?: number): Promise<
   });
 }
 
-chrome.contextMenus?.onClicked.addListener(async (info) => {
+let badgeFlashTimer: ReturnType<typeof setTimeout> | null = null;
+
+function notifyContextAction(message: string, ok = true): void {
+  void chrome.runtime.sendMessage({ type: "tabvault:toast", message }).catch(() => {});
+  if (chrome.action?.setBadgeText) {
+    if (badgeFlashTimer) clearTimeout(badgeFlashTimer);
+    void chrome.action.setBadgeBackgroundColor?.({ color: ok ? "#16A34A" : "#D9383A" }).catch(() => {});
+    void chrome.action.setBadgeText({ text: ok ? "✓" : "!" }).catch(() => {});
+    badgeFlashTimer = setTimeout(() => {
+      badgeFlashTimer = null;
+      void updateBadge();
+    }, 2200);
+  }
+}
+
+chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
   const s = await getSettings();
   const id = String(info.menuItemId || "");
-  if (id === "st-save-snapshot") {
-    await saveAllWindowsAsSession(s).catch(() => {});
-  } else if (id === "st-send-tab") {
-    await collapseTabsToCollection("currentTab", s).catch(() => {});
-    void setupContextMenus();
-  } else if (id === "st-send-window") {
-    await collapseTabsToCollection("currentWindow", s).catch(() => {});
-    void setupContextMenus();
-  } else if (id.startsWith("st-send-tab-col:")) {
-    await collapseTabsToCollection("currentTab", s, id.slice("st-send-tab-col:".length)).catch(() => {});
-    void setupContextMenus();
-  } else if (id.startsWith("st-send-win-col:")) {
-    await collapseTabsToCollection("currentWindow", s, id.slice("st-send-win-col:".length)).catch(() => {});
-    void setupContextMenus();
-  } else if (id === "st-open-dashboard") {
-    await openOrFocusDashboard();
+  try {
+    if (id === "st-save-snapshot") {
+      await saveAllWindowsAsSession(s);
+      notifyContextAction("Saved all open windows as a session.");
+    } else if (id === "st-send-tab") {
+      await collapseTabsToCollection("currentTab", s);
+      void setupContextMenus();
+      notifyContextAction("Moved tab to a new collection.");
+    } else if (id === "st-send-except-this") {
+      await collapseTabsToCollection("exceptCurrent", s);
+      void setupContextMenus();
+      notifyContextAction("Moved other tabs to a new collection.");
+    } else if (id === "st-send-left") {
+      await collapseTabsToCollection("leftTabs", s);
+      void setupContextMenus();
+      notifyContextAction("Moved left tabs to a new collection.");
+    } else if (id === "st-send-right") {
+      await collapseTabsToCollection("rightTabs", s);
+      void setupContextMenus();
+      notifyContextAction("Moved right tabs to a new collection.");
+    } else if (id === "st-send-group") {
+      await collapseTabsToCollection("currentGroup", s);
+      void setupContextMenus();
+      notifyContextAction("Moved tab group to a new collection.");
+    } else if (id === "st-send-window") {
+      await collapseTabsToCollection("currentWindow", s);
+      void setupContextMenus();
+      notifyContextAction("Moved window to a new collection.");
+    } else if (id === "st-send-all-windows") {
+      await collapseTabsToCollection("allWindows", s);
+      void setupContextMenus();
+      notifyContextAction("Moved all windows to a new collection.");
+    } else if (id === "st-nuke-all") {
+      await collapseTabsToCollection("nukeAll", s);
+      void setupContextMenus();
+      notifyContextAction("Saved and closed all windows.");
+    } else if (id === "st-save-link") {
+      const linkUrl = info.linkUrl || "";
+      if (linkUrl && isRestorable(linkUrl)) {
+        const linkText = (info as { linkText?: string }).linkText?.trim() || linkUrl;
+        await handlers.addTabsToCollection({ tabs: [{ url: linkUrl, title: linkText }] });
+        notifyContextAction("Saved link to a new collection.");
+      } else {
+        notifyContextAction("Link cannot be saved.", false);
+      }
+    } else if (id === "st-suspend-tab") {
+      if (tab && (await suspendTab(tab, s))) {
+        notifyContextAction("Tab suspended.");
+      } else {
+        notifyContextAction("Could not suspend this tab.", false);
+      }
+    } else if (id === "st-sleep-idle") {
+      const count = await checkIdleTabs(true);
+      notifyContextAction(count > 0 ? `Slept ${count} idle tab${count === 1 ? "" : "s"}.` : "No idle tabs to sleep.");
+    } else if (id === "st-group-domain") {
+      const res = await handlers.groupWindowByDomain({ windowId: tab?.windowId });
+      notifyContextAction(
+        res.ungrouped
+          ? `Ungrouped ${res.ungrouped} tab${res.ungrouped === 1 ? "" : "s"}.`
+          : res.groupCount
+            ? `Grouped ${res.grouped} tabs into ${res.groupCount} domain group${res.groupCount === 1 ? "" : "s"}.`
+            : "No domain groups created."
+      );
+    } else if (id === "st-dedupe-tabs") {
+      const res = (await handlers.dedupeOpenTabs()) as { closed?: number };
+      notifyContextAction(
+        res?.closed ? `Closed ${res.closed} duplicate tab${res.closed === 1 ? "" : "s"}.` : "No duplicate open tabs found."
+      );
+    } else if (id === "st-open-sidepanel") {
+      const winId = tab?.windowId ?? (await chrome.windows.getLastFocused().catch(() => null))?.id;
+      if (winId != null && chrome.sidePanel?.open) {
+        await chrome.sidePanel.open({ windowId: winId });
+      }
+    } else if (id === "st-exclude-domain") {
+      const rawUrl = info.pageUrl || tab?.url || "";
+      const host = extractDomain(rawUrl);
+      if (host) {
+        const pattern = `*://${host}/*`;
+        if (!s.ignoreUrlPatterns.includes(pattern)) {
+          await saveSettings({ ignoreUrlPatterns: [...s.ignoreUrlPatterns, pattern] });
+          notifyContextAction(`Excluded ${host} from TabVault.`);
+        } else {
+          notifyContextAction(`${host} is already excluded.`);
+        }
+      }
+    } else if (id.startsWith("st-send-tab-col:")) {
+      await collapseTabsToCollection("currentTab", s, id.slice("st-send-tab-col:".length));
+      void setupContextMenus();
+      notifyContextAction("Moved tab to collection.");
+    } else if (id.startsWith("st-send-win-col:")) {
+      await collapseTabsToCollection("currentWindow", s, id.slice("st-send-win-col:".length));
+      void setupContextMenus();
+      notifyContextAction("Moved window to collection.");
+    } else if (id === "st-open-dashboard") {
+      await openOrFocusDashboard();
+    } else if (id === "st-open-settings") {
+      await chrome.runtime.openOptionsPage();
+    }
+  } catch (err) {
+    notifyContextAction(String((err as Error)?.message || "Action failed."), false);
   }
 });
 
@@ -488,7 +664,8 @@ const handlers: RpcHandlerMap = createRpcHandlers({
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return false;
-  if (msg?.target === "offscreen") return false;
+  if (msg?.target === "offscreen" || msg?.target === "sidepanel") return false;
+  if (typeof msg?.cmd !== "string") return false;
   (async () => {
     const cmd = typeof msg?.cmd === "string" ? msg.cmd : "";
     if (!Object.hasOwn(handlers, cmd)) throw new Error(`Unknown command: ${cmd}`);

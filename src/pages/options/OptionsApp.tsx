@@ -25,9 +25,11 @@ import {
   CATEGORIES,
   Card,
   type CategoryId,
+  EXTRA_CONTEXT_MENU_ITEMS,
   RowInput,
   RowSelect,
   RowSwitch,
+  STANDARD_CONTEXT_MENU_ITEMS,
   SettingRow,
   ensureOptionalPermission,
 } from "./OptionsPrimitives.tsx";
@@ -238,7 +240,7 @@ export function OptionsApp({
           </div>
         )}
         <main id={embedded ? undefined : "main-content"} tabIndex={embedded ? undefined : -1} className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden scroll-thin p-5 md:px-8 focus:outline-none">
-          <div className="max-w-4xl w-full space-y-5">
+          <div className={cn("w-full space-y-5", !embedded && "max-w-5xl")}>
           {/* 1. ESSENTIALS & AUTO-SAVE (under General) */}
           {category === "general" && (
             <>
@@ -340,6 +342,86 @@ export function OptionsApp({
                     Edit Shortcuts
                   </Button>
                 </SettingRow>
+              </Card>
+
+              <Card title="Right-Click Context Menu">
+                <SettingRow
+                  title="Enable right-click context menu"
+                  description="Show TabVault actions when right-clicking a webpage or the extension icon."
+                >
+                  <RowSwitch
+                    checked={settings.contextMenuEnabled}
+                    onCheckedChange={(v) => void patchSettings({ contextMenuEnabled: v })}
+                  />
+                </SettingRow>
+                {settings.contextMenuEnabled && (
+                  <>
+                    <div className="p-4 space-y-2">
+                      <div>
+                        <div className="text-[13px] font-medium">Standard Menu Items</div>
+                        <p className="text-[12px] text-[var(--st-muted)] mt-0.5">
+                          Choose which default TabVault actions appear in your browser right-click menu. Hover any item for details.
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {STANDARD_CONTEXT_MENU_ITEMS.map((item) => {
+                          const on = settings.contextMenuItems.includes(item.id);
+                          return (
+                            <label
+                              key={item.id}
+                              data-tip={item.description}
+                              className="flex items-center justify-between gap-2 rounded-md border border-[var(--st-border)] px-3 py-2 text-[12px]"
+                            >
+                              <span className="truncate">{item.label}</span>
+                              <Switch
+                                ariaLabel={`Show ${item.label} in context menu`}
+                                checked={on}
+                                onCheckedChange={(checked) => {
+                                  const next = checked
+                                    ? [...settings.contextMenuItems, item.id]
+                                    : settings.contextMenuItems.filter((x) => x !== item.id);
+                                  void patchSettings({ contextMenuItems: next });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="p-4 space-y-2">
+                      <div>
+                        <div className="text-[13px] font-medium">Extra Options</div>
+                        <p className="text-[12px] text-[var(--st-muted)] mt-0.5">
+                          Add extra quick actions to the right-click menu. Link and tab-specific items appear only when right-clicking a link or webpage.
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {EXTRA_CONTEXT_MENU_ITEMS.map((item) => {
+                          const on = settings.contextMenuItems.includes(item.id);
+                          return (
+                            <label
+                              key={item.id}
+                              data-tip={item.description}
+                              className="flex items-center justify-between gap-2 rounded-md border border-[var(--st-border)] px-3 py-2 text-[12px]"
+                            >
+                              <span className="truncate">{item.label}</span>
+                              <Switch
+                                ariaLabel={`Add ${item.label} to context menu`}
+                                checked={on}
+                                onCheckedChange={(checked) => {
+                                  const next = checked
+                                    ? [...settings.contextMenuItems, item.id]
+                                    : settings.contextMenuItems.filter((x) => x !== item.id);
+                                  void patchSettings({ contextMenuItems: next });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </Card>
 
               <Card title="Automatic Session Saving">
@@ -967,7 +1049,7 @@ export function OptionsApp({
                       })
                     }
                     rows={4}
-                    className="w-full rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] p-2.5 text-[12px] focus:outline-none focus:border-[var(--st-accent)]"
+                    className="text-[12px]"
                   />
                 </div>
               </Card>
@@ -1152,7 +1234,7 @@ export function OptionsApp({
                 <div className="p-4 space-y-2.5">
                   <div className="text-[13px] font-medium">Custom Copy Templates (%t = title, %u = address)</div>
                   <div className="space-y-1.5">
-                    {settings.customCopyTemplates.map((tpl, idx) => (
+                    {(settings.customCopyTemplates || []).map((tpl, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <Input
                           aria-label={`Template ${idx + 1} name`}
@@ -1262,9 +1344,14 @@ export function OptionsApp({
                       onClick={async () => {
                         const ok = await ensureOptionalPermission({ permissions: ["downloads"] });
                         if (ok) {
-                          const res = await sendBg<{ files: number; sessions: number }>("backupNow").catch(() => null);
-                          await loadState();
-                          if (res) notify(`Saved ${plural(res.files, "backup file")}.`);
+                          try {
+                            const res = await sendBg<{ files: number; sessions: number }>("backupNow");
+                            await loadState();
+                            notify(`Saved ${plural(res.files, "backup file")}.`);
+                          } catch (err) {
+                            await loadState();
+                            notify(String((err as Error)?.message || err));
+                          }
                         }
                       }}
                     >
@@ -1681,7 +1768,7 @@ export function OptionsApp({
                   }
                   rows={5}
                   placeholder="chrome://settings/*&#10;*://bank.example.com/*"
-                  className="w-full rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] p-2.5 text-[12px] focus:outline-none focus:border-[var(--st-accent)]"
+                  className="text-[12px]"
                 />
               </div>
             </Card>

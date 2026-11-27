@@ -1,6 +1,7 @@
-import React from "react";
-import { Check, CheckCircle2, Circle, HelpCircle, X } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Check, CheckCircle2, Circle, Cloud, HelpCircle, X } from "lucide-react";
 import type { OnboardingProgress } from "../shared/onboarding.ts";
+import { sendBg } from "../shared/rpc.ts";
 import { Button, cn } from "./ui.tsx";
 
 export interface OnboardingStepItem {
@@ -20,11 +21,16 @@ interface OnboardingCardProps {
   steps: OnboardingStepItem[];
   onDismiss: () => void;
   onOpenGuide?: () => void;
+  showSetupBar?: boolean;
+  driveConnected?: boolean;
+  driveEmail?: string | null;
+  onRefresh?: () => void | Promise<void>;
+  onToast?: (msg: string) => void;
 }
 
 /**
- * First-run activation checklist card shared between Side Panel and Dashboard.
- * Focuses on immediate time-to-value with skippable, action-first milestones.
+ * First-run welcome & activation checklist card shared between Side Panel and Dashboard.
+ * Combines default protection summary, optional backup/cloud setup, and action-first milestones.
  */
 export function OnboardingCard({
   variant = "wide",
@@ -33,8 +39,66 @@ export function OnboardingCard({
   steps,
   onDismiss,
   onOpenGuide,
+  showSetupBar = false,
+  driveConnected = false,
+  driveEmail,
+  onRefresh,
+  onToast,
 }: OnboardingCardProps) {
   const isCompact = variant === "compact";
+  const [downloadsGranted, setDownloadsGranted] = useState(false);
+  const [busyDownloads, setBusyDownloads] = useState(false);
+  const [busyDrive, setBusyDrive] = useState(false);
+
+  useEffect(() => {
+    if (isCompact || !showSetupBar) return;
+    chrome?.permissions
+      ?.contains?.({ permissions: ["downloads"] })
+      .then((ok) => setDownloadsGranted(Boolean(ok)))
+      .catch(() => {});
+  }, [isCompact, showSetupBar]);
+
+  const handleAllowDownloads = async () => {
+    if (busyDownloads || downloadsGranted) return;
+    setBusyDownloads(true);
+    try {
+      const ok = await chrome.permissions.request({ permissions: ["downloads"] });
+      setDownloadsGranted(Boolean(ok));
+      if (ok) {
+        onToast?.("Downloads backup permission enabled");
+        await onRefresh?.();
+      }
+    } catch {
+      onToast?.("Could not request Downloads permission.");
+    } finally {
+      setBusyDownloads(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (busyDrive || driveConnected) return;
+    setBusyDrive(true);
+    try {
+      if (chrome?.permissions?.request) {
+        const granted = await chrome.permissions.request({ permissions: ["identity"] }).catch(() => false);
+        if (!granted) {
+          onToast?.("Allow Google Sign-In permission to continue.");
+          return;
+        }
+      }
+      await sendBg("driveSignIn");
+      let syncWarning: string | null = null;
+      await sendBg("driveSyncNow").catch((err) => {
+        syncWarning = String((err as Error)?.message || err);
+      });
+      await onRefresh?.();
+      onToast?.(syncWarning ? `Signed in to Google Drive (initial sync paused: ${syncWarning})` : "Signed in to Google Drive");
+    } catch (err) {
+      onToast?.(String((err as Error).message || err));
+    } finally {
+      setBusyDrive(false);
+    }
+  };
 
   return (
     <section
@@ -45,20 +109,31 @@ export function OnboardingCard({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className={cn("font-semibold leading-tight", isCompact ? "text-[12.5px]" : "text-[13.5px]")}>
-              {progress.allDone ? "You’re all set" : "Auto-save is protecting your tabs"}
-            </h2>
-            <span className="text-[10.5px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-[var(--st-surface)] border border-[var(--st-border)] text-[var(--st-accent)]">
-              {progress.completedCount}/{progress.totalCount}
-            </span>
+        <div className="flex items-start gap-2.5 min-w-0">
+          {!isCompact && (
+            <img src="icons/logo.svg" alt="TabVault" className="w-7 h-7 rounded-md shrink-0 mt-0.5" />
+          )}
+          <div className="min-w-0 space-y-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className={cn("font-semibold leading-tight", isCompact ? "text-[12.5px]" : "text-[14px]")}>
+                {progress.allDone
+                  ? "You’re all set"
+                  : isCompact
+                    ? "Auto-save is protecting your tabs"
+                    : "Welcome to TabVault — your tabs are auto-protected"}
+              </h2>
+              <span className="text-[10.5px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-[var(--st-surface)] border border-[var(--st-border)] text-[var(--st-accent)]">
+                {progress.completedCount}/{progress.totalCount}
+              </span>
+            </div>
+            <p className={cn("text-[var(--st-muted)]", isCompact ? "text-[11px]" : "text-[12px]")}>
+              {progress.allDone
+                ? "Your sessions are backed up and organized. Dismiss this anytime."
+                : isCompact
+                  ? `Saves every ${autoSaveIntervalMin}m automatically. Try these to get started:`
+                  : `Auto-saves every ${autoSaveIntervalMin}m, recovers crashes, preserves Tab Groups, and restores without duplicates.`}
+            </p>
           </div>
-          <p className={cn("text-[var(--st-muted)]", isCompact ? "text-[11px]" : "text-[12px]")}>
-            {progress.allDone
-              ? "Your sessions are backed up and organized. Dismiss this anytime."
-              : `Saves every ${autoSaveIntervalMin}m automatically. Try these to get started:`}
-          </p>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
@@ -151,6 +226,42 @@ export function OnboardingCard({
             <Check className="w-3.5 h-3.5" />
             Done
           </Button>
+        </div>
+      )}
+
+      {!isCompact && showSetupBar && (
+        <div className="pt-2.5 border-t border-[var(--st-accent)]/20 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11.5px] font-medium text-[var(--st-muted)]">
+            Optional backups &amp; cloud sync:
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant={downloadsGranted ? "outline" : "primary"}
+              disabled={busyDownloads || downloadsGranted}
+              onClick={() => void handleAllowDownloads()}
+            >
+              {downloadsGranted && <Check className="w-3.5 h-3.5 text-[var(--st-success)]" />}
+              {downloadsGranted
+                ? "Downloads Backups Allowed"
+                : busyDownloads
+                  ? "Requesting…"
+                  : "Allow Downloads Backups"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busyDrive || driveConnected}
+              onClick={() => void handleGoogleSignIn()}
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              {driveConnected
+                ? `Google Drive: ${driveEmail || "Connected"}`
+                : busyDrive
+                  ? "Signing in…"
+                  : "Sign in with Google"}
+            </Button>
+          </div>
         </div>
       )}
     </section>

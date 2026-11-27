@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restricted Page — TabVault</title>
+    <link rel="icon" type="image/svg+xml" href="icons/favicon.svg" />
+    <link rel="stylesheet" href="/src/styles/app.css" />
+  </head>
+  <body class="min-h-screen bg-[var(--st-canvas)] text-[var(--st-ink)] flex items-center justify-center p-6">
+    <div id="root" class="max-w-lg w-full p-6 rounded-xl bg-[var(--st-surface)] border border-[var(--st-border)] space-y-4">
+      <div class="space-y-1">
+        <h1 id="title" class="text-[15px] font-semibold truncate">Restricted page</h1>
+        <p class="text-[12.5px] text-[var(--st-muted)] leading-snug">
+          Your browser blocks extensions from opening internal or local pages directly. Copy the address below and paste it into the address bar.
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <input
+          id="urlInput"
+          type="text"
+          readonly
+          aria-label="Restricted page URL"
+          class="flex-1 h-8 px-2.5 rounded-md border border-[var(--st-border)] bg-[var(--st-subtle)] text-[12.5px] text-[var(--st-ink)] focus:outline-none focus:border-[var(--st-accent)]"
+        />
+        <button
+          id="copyBtn"
+          type="button"
+          class="h-8 px-3 rounded-md bg-[var(--st-accent)] text-[var(--st-accent-fg)] text-[12.5px] font-medium cursor-pointer shrink-0"
+        >
+          Copy URL
+        </button>
+      </div>
+    </div>
+    <script type="module" src="/src/pages/replaced/main.ts"></script>
+  </body>
+</html>

@@ -1,187 +1,48 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Archive, ArrowLeftRight, ExternalLink, FolderPlus, Layers, Pin, Plus, RotateCcw, Save, Search, Settings as SettingsIcon, X } from "lucide-react";
-import { BackupPermissionBanner, BuyMeACoffeeButton, HeaderAccountButton, QuickIntervalButton } from "../../components/HeaderExtras.tsx";
+import { BackupPermissionBanner, BuyMeACoffeeButton, HeaderAccountButton, HeaderSleepButton, QuickIntervalButton } from "../../components/HeaderExtras.tsx";
+import { ConfirmDialog } from "../../components/ConfirmDialog.tsx";
 import { EmptyStateCard, OnboardingCard } from "../../components/OnboardingCard.tsx";
 import { Button, GlobalTooltip, Input, TabFavicon, cn } from "../../components/ui.tsx";
+import { useCompactSurfaceController } from "../../hooks/useCompactSurfaceController.ts";
 import { formatTabDisplayUrl } from "../../shared/core.ts";
-import { applyTheme, formatTimestamp, openOrFocusDashboard, plural } from "../../shared/format.ts";
+import { formatTimestamp, openOrFocusDashboard, plural } from "../../shared/format.ts";
+import { t } from "../../shared/i18n.ts";
 import { useOnboarding } from "../../shared/onboarding.ts";
 import { sendBg } from "../../shared/rpc.ts";
-import type { AppStateSummary, CollectionRecord, SavedWindow, SearchHit, SnapshotMeta } from "../../shared/types.ts";
+import type { SnapshotMeta } from "../../shared/types.ts";
 
 export function SidePanelApp() {
-  const [state, setState] = useState<AppStateSummary | null>(null);
-  const [openWindows, setOpenWindows] = useState<SavedWindow[]>([]);
-  const [metas, setMetas] = useState<SnapshotMeta[]>([]);
-  const [collections, setCollections] = useState<CollectionRecord[]>([]);
-  const [section, setSection] = useState<"open" | "saved" | "collections">("open");
+  const {
+    state,
+    openWindows,
+    metas,
+    collections,
+    query: filter,
+    setQuery: setFilter,
+    searchSource,
+    setSearchSource,
+    filteredHits,
+    activeHitIdx,
+    setActiveHitIdx,
+    duplicateOpenCount,
+    pendingSwitchCol,
+    setPendingSwitchCol,
+    confirmSwitchSpace,
+    toast,
+    showToast,
+    tipDismissed,
+    dismissTip,
+    searchInputRef,
+    refresh,
+    activateSearchHit,
+  } = useCompactSurfaceController({ closeOnActivate: false, watchLiveTabs: true, toastDurationMs: 2200 });
+
+  const [section, setSection] = useState<"open" | "sessions" | "collections">("open");
   const [activeWinIdx, setActiveWinIdx] = useState(0);
   const [sessionName, setSessionName] = useState("");
-  const [filter, setFilter] = useState("");
-  const [searchSource, setSearchSource] = useState<"all" | "open" | "snapshot" | "collection">("all");
-  const [searchResults, setSearchResults] = useState<SearchHit[] | null>(null);
-  const [activeHitIdx, setActiveHitIdx] = useState(0);
   const [saving, setSaving] = useState(false);
   const [confirmCloseWin, setConfirmCloseWin] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const [tipDismissed, setTipDismissed] = useState(() => {
-    try {
-      return localStorage.getItem("tabvault:tipDismissed") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 2200);
-  };
-
-  const refresh = useCallback(async () => {
-    const [st, wins, list, cols] = await Promise.all([
-      sendBg<AppStateSummary>("state"),
-      sendBg<SavedWindow[]>("getOpenWindows"),
-      sendBg<SnapshotMeta[]>("listSnapshots"),
-      sendBg<CollectionRecord[]>("listCollections"),
-    ]);
-    if (st.recovery) {
-      const checked = await sendBg("checkRecoveryNow");
-      if (!checked) st.recovery = null;
-    }
-    setState(st);
-    setOpenWindows(wins);
-    setMetas(list);
-    setCollections(cols);
-    applyTheme(st.settings.theme);
-  }, []);
-
-  useEffect(() => {
-    void refresh().catch((e) => showToast(String((e as Error)?.message || e)));
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleRefresh = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        void refresh().catch(() => {});
-      }, 200);
-    };
-    const listener = (msg: { type?: string }) => {
-      if (msg?.type === "tabvault:updated") {
-        scheduleRefresh();
-      }
-    };
-    const onVisibility = () => {
-      if (!document.hidden) scheduleRefresh();
-    };
-    chrome.runtime?.onMessage?.addListener(listener);
-    chrome.tabs?.onCreated?.addListener(scheduleRefresh);
-    chrome.tabs?.onRemoved?.addListener(scheduleRefresh);
-    chrome.tabs?.onUpdated?.addListener(scheduleRefresh);
-    chrome.windows?.onFocusChanged?.addListener(scheduleRefresh);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      if (timer) clearTimeout(timer);
-      chrome.runtime?.onMessage?.removeListener(listener);
-      chrome.tabs?.onCreated?.removeListener(scheduleRefresh);
-      chrome.tabs?.onRemoved?.removeListener(scheduleRefresh);
-      chrome.tabs?.onUpdated?.removeListener(scheduleRefresh);
-      chrome.windows?.onFocusChanged?.removeListener(scheduleRefresh);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refresh]);
-
-  useEffect(() => {
-    const q = filter.trim();
-    if (!q) {
-      setSearchResults(null);
-      setActiveHitIdx(0);
-      return;
-    }
-    const timer = setTimeout(() => {
-      void sendBg<SearchHit[]>("searchAll", { q })
-        .then((res) => {
-          setSearchResults(res);
-          setActiveHitIdx(0);
-        })
-        .catch((e) => showToast(String((e as Error)?.message || e)));
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [filter]);
-
-  const filteredHits = useMemo(() => {
-    if (!searchResults) return null;
-    if (searchSource === "all") return searchResults;
-    return searchResults.filter((h) => h.source === searchSource);
-  }, [searchResults, searchSource]);
-
-  const duplicateOpenCount = useMemo(() => {
-    const seen = new Set<string>();
-    let dupes = 0;
-    for (const w of openWindows) {
-      for (const t of w.tabs) {
-        if (t.pinned) continue;
-        if (seen.has(t.url)) dupes++;
-        else seen.add(t.url);
-      }
-    }
-    return dupes;
-  }, [openWindows]);
-
-  const activateSearchHit = useCallback((hit: SearchHit) => {
-    if (hit.source === "open") {
-      void sendBg("focusOpenTab", {
-        windowId: Number(hit.id) || undefined,
-        url: hit.tab.url,
-        tabId: hit.tab.id,
-      });
-    } else {
-      void sendBg("openUrl", { url: hit.tab.url });
-    }
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const inOtherInput =
-        target &&
-        target !== searchInputRef.current &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-        return;
-      }
-      if (e.key === "/" && !inOtherInput && document.activeElement !== searchInputRef.current) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        return;
-      }
-      if (e.key === "Escape" && filter) {
-        e.preventDefault();
-        setFilter("");
-        return;
-      }
-      if (filteredHits && filteredHits.length > 0 && !inOtherInput) {
-        const max = Math.min(filteredHits.length, 50);
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setActiveHitIdx((i) => (i + 1) % max);
-        } else if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setActiveHitIdx((i) => (i - 1 + max) % max);
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          const hit = filteredHits[Math.min(activeHitIdx, max - 1)];
-          if (hit) activateSearchHit(hit);
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filter, filteredHits, activeHitIdx, activateSearchHit]);
 
   const openDashboard = async (sectionParam?: string) => {
     const path = sectionParam ? `dashboard.html?section=${sectionParam}` : "dashboard.html";
@@ -293,6 +154,7 @@ export function SidePanelApp() {
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <HeaderSleepButton state={state} onRefresh={refresh} onToast={showToast} compact />
           <QuickIntervalButton state={state} onRefresh={refresh} onToast={showToast} compact />
           <HeaderAccountButton state={state} onRefresh={refresh} onToast={showToast} compact />
           <BuyMeACoffeeButton compact />
@@ -459,7 +321,7 @@ export function SidePanelApp() {
               [
                 ["all", "All"],
                 ["open", "Open"],
-                ["snapshot", "Saved"],
+                ["snapshot", "Sessions"],
                 ["collection", "Collections"],
               ] as const
             ).map(([id, label]) => (
@@ -485,14 +347,15 @@ export function SidePanelApp() {
           <div className="flex items-center gap-3 -mb-2">
             {(
               [
-                ["open", `Open (${openWindows.length})`],
-                ["saved", `Saved (${metas.length})`],
-                ["collections", `Collections (${collections.length})`],
+                ["open", `${t("tabOpen", "Open")} (${openWindows.length})`, "Currently open browser windows and tabs"],
+                ["sessions", `${t("tabSessions", "Sessions")} (${metas.length})`, "Point-in-time window snapshots & auto-saves"],
+                ["collections", `${t("tabCollections", "Collections")} (${collections.length})`, "Persistent, editable tab folders & workspaces"],
               ] as const
-            ).map(([id, label]) => (
+            ).map(([id, label, tip]) => (
               <button
                 key={id}
                 type="button"
+                title={tip}
                 onClick={() => setSection(id)}
                 className={cn(
                   "h-8 border-b-2 text-[12px] font-semibold cursor-pointer",
@@ -539,7 +402,12 @@ export function SidePanelApp() {
       <main className="flex-1 overflow-y-auto scroll-thin p-2.5 space-y-1.5">
         {filteredHits ? (
           filteredHits.length === 0 ? (
-            <div className="py-10 text-center text-[12px] text-[var(--st-muted)]">No matching tabs found.</div>
+            <div className="py-10 text-center space-y-2">
+              <div className="text-[12px] text-[var(--st-muted)]">No matching tabs found.</div>
+              <Button size="sm" variant="outline" onClick={() => setFilter("")}>
+                Clear search
+              </Button>
+            </div>
           ) : (
             filteredHits.slice(0, 50).map((hit, i) => (
               <button
@@ -594,7 +462,7 @@ export function SidePanelApp() {
                     title: "Turn a window into a Collection",
                     description: "Group a window's tabs into a reusable workspace.",
                     done: onboarding.progress.createdCollection,
-                    actionLabel: "Save Win",
+                    actionLabel: "Save Window",
                     disabled: !currentWin,
                     onAction: () =>
                       void sendBg("saveWindowAsSpace", { windowId: currentWin?.id })
@@ -607,7 +475,7 @@ export function SidePanelApp() {
                   {
                     id: "enable-tab-sleep",
                     title: "Enable Tab Sleep (save RAM)",
-                    description: "Automatically discard idle tabs to keep Chrome fast.",
+                    description: "Automatically sleep idle tabs to free memory and keep Chrome fast.",
                     done: onboarding.progress.tabSleepEnabled,
                     actionLabel: "Enable",
                     onAction: () =>
@@ -655,7 +523,7 @@ export function SidePanelApp() {
                           .catch((e) => showToast(String((e as Error)?.message || e)))
                       }
                     >
-                      Tidy {duplicateOpenCount} Dupes
+                      Close {duplicateOpenCount} Duplicates
                     </Button>
                   )}
                   <Button
@@ -733,7 +601,7 @@ export function SidePanelApp() {
             </div>
           )}
           </>
-        ) : section === "saved" ? (
+        ) : section === "sessions" ? (
           (() => {
             const visibleMetas = metas.filter((m) => !q || (m.name || "").toLowerCase().includes(q)).slice(0, 25);
             if (visibleMetas.length === 0) {
@@ -887,9 +755,8 @@ export function SidePanelApp() {
                       aria-label={`Switch current window to ${c.title}`}
                       onClick={() => {
                         if (c.trackingWindowId == null && !state?.settings.bypassConfirm.replace) {
-                          if (!window.confirm(`Save current window tabs and replace this window with "${c.title}"?`)) {
-                            return;
-                          }
+                          setPendingSwitchCol(c);
+                          return;
                         }
                         void sendBg("switchSpace", { collectionId: c.id })
                           .then(() => {
@@ -946,19 +813,26 @@ export function SidePanelApp() {
             aria-label="Dismiss tip"
             title="Dismiss tip"
             className="text-[var(--st-muted)] hover:text-[var(--st-ink)] shrink-0 cursor-pointer"
-            onClick={() => {
-              setTipDismissed(true);
-              try {
-                localStorage.setItem("tabvault:tipDismissed", "1");
-              } catch {
-                /* ignore */
-              }
-            }}
+            onClick={dismissTip}
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
+
+      <ConfirmDialog
+        request={
+          pendingSwitchCol
+            ? {
+                title: "Replace Current Window?",
+                description: `Save current window tabs and replace this window with "${pendingSwitchCol.title}"?`,
+                confirmLabel: "Save & Switch",
+                variant: "primary",
+              }
+            : null
+        }
+        onResolve={confirmSwitchSpace}
+      />
 
       {toast && (
         <div

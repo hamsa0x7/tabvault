@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ConfirmDialogRequest } from "../components/ConfirmDialog.tsx";
 import { extractDomain, findDuplicateOpenTabIds } from "../shared/core.ts";
+import { DEFAULT_COLLECTION_COLOR } from "../shared/defaults.ts";
 import { applyTheme, plural, triggerTextDownload } from "../shared/format.ts";
 import {
   collectionToSnapshot,
@@ -135,7 +137,7 @@ export function useDashboardController() {
   const [newColDialogOpen, setNewColDialogOpen] = useState(false);
   const [newColTitle, setNewColTitle] = useState("");
   const [newColKind, setNewColKind] = useState<"group" | "folder">("group");
-  const [newColColor, setNewColColor] = useState("#0EA5E9");
+  const [newColColor, setNewColColor] = useState<string>(DEFAULT_COLLECTION_COLOR);
   const [newColParent, setNewColParent] = useState<string>("");
 
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -151,6 +153,23 @@ export function useDashboardController() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingItemNote, setEditingItemNote] = useState("");
   const [showArchivedItems, setShowArchivedItems] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmDialogRequest | null>(null);
+  const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+
+  const requestConfirm = useCallback((req: ConfirmDialogRequest): Promise<boolean> => {
+    confirmResolverRef.current?.(false);
+    setConfirmRequest(req);
+    return new Promise<boolean>((resolve) => {
+      confirmResolverRef.current = resolve;
+    });
+  }, []);
+
+  const resolveConfirm = useCallback((confirmed: boolean) => {
+    const resolver = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmRequest(null);
+    resolver?.(confirmed);
+  }, []);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -169,31 +188,39 @@ export function useDashboardController() {
     return () => clearTimeout(id);
   }, [toast]);
 
-  const loadAll = useCallback(async () => {
-    try {
-      const [st, snaps, cols, openWins, pinned] = await Promise.all([
-        sendBg<AppStateSummary>("state"),
-        sendBg<SnapshotMeta[]>("listSnapshots"),
-        sendBg<CollectionRecord[]>("listCollections"),
-        sendBg<SavedWindow[]>("getOpenWindows"),
-        sendBg<string[]>("listPinnedBookmarks").catch(() => []),
-      ]);
-      setState(st);
-      setSnapshots(snaps);
-      setCollections(cols);
-      setOpenWindows(openWins);
-      setPinnedBookmarks(new Set(pinned));
-      applyTheme(st.settings.theme);
-      setRestoreMode(st.settings.defaultOpenMode);
-      setSkipAlreadyOpen(st.settings.skipAlreadyOpenOnCrashRestore);
+  const pendingLoadRef = useRef<Promise<void> | null>(null);
+  const loadAll = useCallback(() => {
+    if (pendingLoadRef.current) return pendingLoadRef.current;
+    const promise = (async () => {
+      try {
+        const [st, snaps, cols, openWins, pinned] = await Promise.all([
+          sendBg<AppStateSummary>("state"),
+          sendBg<SnapshotMeta[]>("listSnapshots"),
+          sendBg<CollectionRecord[]>("listCollections"),
+          sendBg<SavedWindow[]>("getOpenWindows"),
+          sendBg<string[]>("listPinnedBookmarks").catch(() => []),
+        ]);
+        setState(st);
+        setSnapshots(snaps);
+        setCollections(cols);
+        setOpenWindows(openWins);
+        setPinnedBookmarks(new Set(pinned));
+        applyTheme(st.settings.theme);
+        setRestoreMode(st.settings.defaultOpenMode);
+        setSkipAlreadyOpen(st.settings.skipAlreadyOpenOnCrashRestore);
 
-      setSelectedSnapshotId((prev) => {
-        if (prev && snaps.some((s) => s.id === prev)) return prev;
-        return snaps[0]?.id ?? null;
-      });
-    } catch (err) {
-      notifyError(err, "Failed to load extension state.");
-    }
+        setSelectedSnapshotId((prev) => {
+          if (prev && snaps.some((s) => s.id === prev)) return prev;
+          return snaps[0]?.id ?? null;
+        });
+      } catch (err) {
+        notifyError(err, "Failed to load extension state.");
+      } finally {
+        pendingLoadRef.current = null;
+      }
+    })();
+    pendingLoadRef.current = promise;
+    return promise;
   }, [notifyError]);
 
   useEffect(() => {
@@ -230,14 +257,24 @@ export function useDashboardController() {
   }, [loadAll, notify, notifyError]);
 
   useEffect(() => {
-    const listener = (msg: { type?: string }) => {
+    let updateTimer: ReturnType<typeof setTimeout> | null = null;
+    const listener = (msg: { type?: string; message?: string }) => {
       if (msg?.type === "tabvault:updated") {
-        void loadAll();
+        if (updateTimer) clearTimeout(updateTimer);
+        updateTimer = setTimeout(() => {
+          updateTimer = null;
+          void loadAll();
+        }, 150);
+      } else if (msg?.type === "tabvault:toast" && msg.message) {
+        notify(msg.message);
       }
     };
     chrome.runtime?.onMessage?.addListener(listener);
-    return () => chrome.runtime?.onMessage?.removeListener(listener);
-  }, [loadAll]);
+    return () => {
+      if (updateTimer) clearTimeout(updateTimer);
+      chrome.runtime?.onMessage?.removeListener(listener);
+    };
+  }, [loadAll, notify]);
 
   useEffect(() => {
     if (!selectedSnapshotId) {
@@ -520,9 +557,21 @@ export function useDashboardController() {
 
   const handleCollapse = async (scope: CollapseScope, targetCollectionId?: string, windowId?: number) => {
     if (scope === "nukeAll" && settings && !settings.bypassConfirm.closeWindow) {
-      if (!window.confirm("Save all open tabs into a collection and close every browser window?")) return;
+      const ok = await requestConfirm({
+        title: "Move all open tabs & close windows?",
+        description: "All open tabs will be saved into a Collection and every browser window will close.",
+        confirmLabel: "Move & Close All",
+        variant: "primary",
+      });
+      if (!ok) return;
     } else if (scope === "currentWindow" && settings && !settings.bypassConfirm.closeWindow) {
-      if (!window.confirm("Save all tabs in this window into a collection and close the window?")) return;
+      const ok = await requestConfirm({
+        title: "Move window tabs & close window?",
+        description: "All tabs in this window will be saved into a Collection and the window will close.",
+        confirmLabel: "Move & Close",
+        variant: "primary",
+      });
+      if (!ok) return;
     }
     setBusy(true);
     try {
@@ -556,7 +605,13 @@ export function useDashboardController() {
       restoreMode === "currentWindow" &&
       windowIndex == null
     ) {
-      if (!window.confirm("Replace all non-pinned tabs in your current window with this session?")) return;
+      const ok = await requestConfirm({
+        title: "Replace current window?",
+        description: "Non-pinned tabs in your current window will be replaced by this saved session.",
+        confirmLabel: "Replace Window",
+        variant: "primary",
+      });
+      if (!ok) return;
     }
     if (
       meta &&
@@ -565,7 +620,13 @@ export function useDashboardController() {
       meta.n >= settings.warnOnOpenTabCount &&
       windowIndex == null
     ) {
-      if (!window.confirm(`Open ${meta.n} tabs from this session?`)) return;
+      const ok = await requestConfirm({
+        title: `Open ${plural(meta.n, "tab")}?`,
+        description: "Opening many tabs at once may slow down your browser temporarily.",
+        confirmLabel: `Open ${meta.n} Tabs`,
+        variant: "primary",
+      });
+      if (!ok) return;
     }
     setBusy(true);
     try {
@@ -615,7 +676,13 @@ export function useDashboardController() {
   const handleDeleteSnapshots = async (ids: string[]) => {
     if (ids.length === 0) return;
     if (settings && !settings.bypassConfirm.deleteSession) {
-      if (!window.confirm(`Delete ${plural(ids.length, "session")}? This can't be undone.`)) return;
+      const ok = await requestConfirm({
+        title: `Delete ${plural(ids.length, "session")}?`,
+        description: "This permanently removes the selected session history. This can't be undone.",
+        confirmLabel: `Delete ${plural(ids.length, "Session")}`,
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     setBusy(true);
     try {
@@ -835,22 +902,42 @@ export function useDashboardController() {
       return;
     }
     if (settings && !settings.bypassConfirm.deleteSession) {
-      if (!window.confirm(`Delete "${col.title}"? This can't be undone.`)) return;
+      const ok = await requestConfirm({
+        title: `Delete "${col.title}"?`,
+        description: "This permanently removes the collection and its saved tabs. This can't be undone.",
+        confirmLabel: "Delete Collection",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
-    await sendBg("deleteCollection", { id: col.id });
-    if (selectedCollectionId === col.id) setSelectedCollectionId(null);
-    await loadAll();
-    notify(`Deleted "${col.title}".`);
+    setBusy(true);
+    try {
+      await sendBg("deleteCollection", { id: col.id });
+      if (selectedCollectionId === col.id) setSelectedCollectionId(null);
+      await loadAll();
+      notify(`Deleted "${col.title}".`);
+    } catch (err) {
+      notifyError(err, "Could not delete collection.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleRestoreCollection = async (id: string, actionOverride?: "keep" | "remove" | "archive") => {
-    const res = await sendBg<{ opened: number }>("restoreCollection", {
-      id,
-      actionOverride,
-      modeOverride: restoreMode,
-    });
-    await loadAll();
-    notify(`Opened ${plural(res.opened, "tab")}.`);
+    setBusy(true);
+    try {
+      const res = await sendBg<{ opened: number }>("restoreCollection", {
+        id,
+        actionOverride,
+        modeOverride: restoreMode,
+      });
+      await loadAll();
+      notify(`Opened ${plural(res.opened, "tab")}.`);
+    } catch (err) {
+      notifyError(err, "Could not open collection.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleToggleItemField = async (col: CollectionRecord, itemId: string, patch: Partial<CollectionItem>) => {
@@ -869,7 +956,13 @@ export function useDashboardController() {
       return;
     }
     if (settings && !settings.bypassConfirm.deleteItem) {
-      if (!window.confirm("Remove this tab from the collection?")) return;
+      const ok = await requestConfirm({
+        title: "Remove tab from collection?",
+        description: "You can undo this action immediately afterward if needed.",
+        confirmLabel: "Remove Tab",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     const next: CollectionRecord = {
       ...col,
@@ -880,52 +973,69 @@ export function useDashboardController() {
   };
 
   const handleSleepIdle = async () => {
-    const res = await sendBg<{ count: number }>("sleepIdleNow");
-    await loadAll();
-    notify(res.count > 0 ? `Put ${plural(res.count, "idle tab")} to sleep.` : "No idle tabs needed sleeping.");
+    setBusy(true);
+    try {
+      const res = await sendBg<{ count: number }>("sleepIdleNow");
+      await loadAll();
+      notify(res.count > 0 ? `Put ${plural(res.count, "idle tab")} to sleep.` : "No idle tabs needed sleeping.");
+    } catch (err) {
+      notifyError(err, "Could not sleep idle tabs.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleMergeSelected = async () => {
     const ids = Array.from(checkedIds);
     if (ids.length < 2) return;
-    const snaps = (await Promise.all(ids.map((id) => sendBg<SessionSnapshot | null>("getSnapshot", { id })))).filter(
-      Boolean
-    ) as SessionSnapshot[];
-    const seen = new Set<string>();
-    const mergedTabs: SavedTab[] = [];
-    for (const s of snaps) {
-      for (const w of s.windows) {
-        for (const t of w.tabs) {
-          if (seen.has(t.url)) continue;
-          seen.add(t.url);
-          mergedTabs.push(t);
+    setBusy(true);
+    try {
+      const snaps = (await Promise.all(ids.map((id) => sendBg<SessionSnapshot | null>("getSnapshot", { id })))).filter(
+        Boolean
+      ) as SessionSnapshot[];
+      const seen = new Set<string>();
+      const mergedTabs: SavedTab[] = [];
+      for (const s of snaps) {
+        for (const w of s.windows) {
+          for (const t of w.tabs) {
+            if (seen.has(t.url)) continue;
+            seen.add(t.url);
+            mergedTabs.push(t);
+          }
         }
       }
+      if (mergedTabs.length === 0) {
+        notify("No tabs to merge.");
+        return;
+      }
+      const col = await sendBg<CollectionRecord>("createCollection", {
+        title: `Merged (${snaps.length} sessions)`,
+        kind: "group",
+        color: "#6366F1",
+      });
+      const nextCol: CollectionRecord = {
+        ...col,
+        items: mergedTabs.map((t, idx) => ({
+          id: `${Date.now().toString(36)}_${idx}`,
+          url: t.url,
+          title: t.title,
+          favIconUrl: t.favIconUrl,
+          pinned: t.pinned,
+          addedAt: Date.now(),
+        })),
+      };
+      await sendBg("saveCollection", { col: nextCol });
+      setCheckedIds(new Set());
+      await loadAll();
+      setSection("collections");
+      setSelectedCollectionId(nextCol.id);
+      setSelectedSnapshotId(null);
+      notify(`Merged ${plural(mergedTabs.length, "unique tab")} into "${nextCol.title}".`);
+    } catch (err) {
+      notifyError(err, "Could not merge selected sessions.");
+    } finally {
+      setBusy(false);
     }
-    if (mergedTabs.length === 0) return;
-    const col = await sendBg<CollectionRecord>("createCollection", {
-      title: `Merged (${snaps.length} sessions)`,
-      kind: "group",
-      color: "#6366F1",
-    });
-    const nextCol: CollectionRecord = {
-      ...col,
-      items: mergedTabs.map((t, idx) => ({
-        id: `${Date.now().toString(36)}_${idx}`,
-        url: t.url,
-        title: t.title,
-        favIconUrl: t.favIconUrl,
-        pinned: t.pinned,
-        addedAt: Date.now(),
-      })),
-    };
-    await sendBg("saveCollection", { col: nextCol });
-    setCheckedIds(new Set());
-    await loadAll();
-    setSection("collections");
-    setSelectedCollectionId(nextCol.id);
-    setSelectedSnapshotId(null);
-    notify(`Merged ${plural(mergedTabs.length, "unique tab")} into "${nextCol.title}".`);
   };
 
   const handleMergeToSession = async () => {
@@ -1213,6 +1323,8 @@ export function useDashboardController() {
     handleImportSubmit,
     handleImportFilePick,
     handleThemeCycle,
+    confirmRequest,
+    resolveConfirm,
   };
 }
 

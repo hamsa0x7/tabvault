@@ -11,307 +11,27 @@ import {
   recordSyncTombstones,
   saveSettings,
 } from "../shared/db.ts";
-import { detectAndParseImport, exportAsJson } from "../shared/import-export.ts";
+import { detectAndParseImport } from "../shared/import-export.ts";
 import { DAY, uid } from "../shared/core.ts";
 import type { CollectionRecord, SessionSnapshot, Settings } from "../shared/types.ts";
 
-let creatingOffscreen: Promise<void> | null = null;
-let offscreenQueue: Promise<unknown> = Promise.resolve();
-let downloadsListenerAttached = false;
-
-const PENDING_OFFSCREEN_KEY = "pendingOffscreenDownloads";
-
-interface PendingOffscreenDownload {
-  url: string;
-  createdAt: number;
-}
-
-function withOffscreenLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = offscreenQueue.then(fn, fn);
-  offscreenQueue = next.then(
-    () => undefined,
-    () => undefined
-  );
-  return next;
-}
-
-async function readPendingOffscreenDownloads(): Promise<Record<string, PendingOffscreenDownload>> {
-  const res = (await chrome.storage?.session?.get(PENDING_OFFSCREEN_KEY).catch(() => ({}))) as
-    | { pendingOffscreenDownloads?: Record<string, PendingOffscreenDownload> }
-    | undefined;
-  return { ...(res?.pendingOffscreenDownloads || {}) };
-}
-
-async function writePendingOffscreenDownloads(map: Record<string, PendingOffscreenDownload>): Promise<void> {
-  if (Object.keys(map).length === 0) {
-    await chrome.storage?.session?.remove?.(PENDING_OFFSCREEN_KEY).catch(() => {});
-  } else {
-    await chrome.storage?.session?.set?.({ [PENDING_OFFSCREEN_KEY]: map }).catch(() => {});
-  }
-}
-
-async function closeOffscreenIfIdle(): Promise<void> {
-  if (!chrome.offscreen) return;
-  const remaining = await readPendingOffscreenDownloads();
-  if (Object.keys(remaining).length > 0) return;
-  const contexts = await chrome.runtime
-    .getContexts?.({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT] })
-    .catch(() => []);
-  if (contexts && contexts.length > 0) {
-    await chrome.offscreen.closeDocument?.().catch(() => {});
-  }
-}
-
-async function revokeAndCloseUrl(url: string): Promise<void> {
-  await chrome.runtime.sendMessage({ target: "offscreen", cmd: "revokeObjectUrl", url }).catch(() => {});
-  await closeOffscreenIfIdle();
-}
-
-export function cleanupOffscreenDownloads(expiredOnly = false): Promise<void> {
-  return withOffscreenLock(async () => {
-    const map = await readPendingOffscreenDownloads();
-    const ids = Object.keys(map);
-    if (ids.length === 0) {
-      await closeOffscreenIfIdle();
-      return;
-    }
-    const now = Date.now();
-    const toRevoke: string[] = [];
-    for (const idStr of ids) {
-      const entry = map[idStr];
-      if (!entry) continue;
-      let done = !expiredOnly || now - entry.createdAt >= 55_000;
-      if (!done && chrome.downloads?.search) {
-        const found = await chrome.downloads.search({ id: Number(idStr) }).catch(() => []);
-        if (!found.length || found[0].state === "complete" || found[0].state === "interrupted") {
-          done = true;
-        }
-      }
-      if (done) {
-        toRevoke.push(entry.url);
-        delete map[idStr];
-      }
-    }
-    if (toRevoke.length > 0) {
-      await writePendingOffscreenDownloads(map);
-      for (const url of toRevoke) {
-        await chrome.runtime.sendMessage({ target: "offscreen", cmd: "revokeObjectUrl", url }).catch(() => {});
-      }
-    }
-    await closeOffscreenIfIdle();
-  });
-}
-
-export function attachOffscreenDownloadListener(): void {
-  if (downloadsListenerAttached || !chrome.downloads?.onChanged?.addListener) return;
-  downloadsListenerAttached = true;
-  chrome.downloads.onChanged.addListener((delta) => {
-    if (delta.state?.current !== "complete" && delta.state?.current !== "interrupted") return;
-    void withOffscreenLock(async () => {
-      const map = await readPendingOffscreenDownloads();
-      const entry = map[String(delta.id)];
-      if (!entry) return;
-      delete map[String(delta.id)];
-      await writePendingOffscreenDownloads(map);
-      await revokeAndCloseUrl(entry.url);
-    });
-  });
-}
-
-async function ensureOffscreen(): Promise<void> {
-  if (!chrome.offscreen) return;
-  const contexts = await chrome.runtime.getContexts?.({
-    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-  });
-  if (contexts && contexts.length > 0) return;
-  if (!creatingOffscreen) {
-    creatingOffscreen = chrome.offscreen
-      .createDocument({
-        url: "offscreen.html",
-        reasons: [chrome.offscreen.Reason.BLOBS],
-        justification: "Create temporary Blob download URLs for large session backups",
-      })
-      .finally(() => {
-        creatingOffscreen = null;
-      });
-  }
-  await creatingOffscreen;
-}
-
-function toBase64Utf8(str: string): string {
-  const bytes = new TextEncoder().encode(str);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(bin);
-}
-
-export async function downloadTextFile(filename: string, content: string, mime = "application/json", saveAs = false): Promise<number> {
-  if (!(await chrome.permissions.contains({ permissions: ["downloads"] }))) {
-    throw new Error("Allow Downloads permission in Settings first.");
-  }
-  attachOffscreenDownloadListener();
-
-  let url: string | null = null;
-  let offscreenUrl = false;
-  try {
-    await ensureOffscreen();
-    const res = (await chrome.runtime.sendMessage({
-      target: "offscreen",
-      cmd: "createObjectUrl",
-      content,
-      mime,
-    })) as { url?: string } | undefined;
-    if (res?.url) {
-      url = res.url;
-      offscreenUrl = true;
-    }
-  } catch {
-    url = null;
-  }
-
-  if (!url) {
-    url = `data:${mime};base64,${toBase64Utf8(content)}`;
-  }
-
-  try {
-    const id = await chrome.downloads.download({
-      url,
-      filename,
-      conflictAction: "uniquify",
-      saveAs,
-    });
-    if (offscreenUrl && url) {
-      await withOffscreenLock(async () => {
-        const map = await readPendingOffscreenDownloads();
-        map[String(id)] = { url: url!, createdAt: Date.now() };
-        await writePendingOffscreenDownloads(map);
-      });
-      await chrome.alarms?.create?.("offscreenCleanup", { delayInMinutes: 1 });
-    }
-    return id;
-  } catch (err) {
-    if (offscreenUrl && url) {
-      await withOffscreenLock(() => revokeAndCloseUrl(url!));
-    }
-    throw err;
-  }
-}
-
-export async function writeLocalBackup(): Promise<{ files: number; sessions: number }> {
-  const settings = await getSettings();
-  const snaps = [...(await getAllSnapshots())].sort((a, b) => b.t - a.t);
-  const cols = await getAllCollections();
-  const folder = (settings.localBackupFolder || "TabVault").replace(/[\\/:*?"<>|]/g, "_");
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-
-  if (settings.localBackupIndividual) {
-    let count = 0;
-    for (const s of snaps.slice(0, settings.localBackupMaxFiles)) {
-      const safeName = (s.name || s.id).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
-      await downloadTextFile(`${folder}/${stamp}-${safeName}.json`, exportAsJson([s]));
-      count++;
-    }
-    await chrome.storage.local.set({ lastBackupAt: Date.now(), lastBackupError: null });
-    return { files: count, sessions: snaps.length };
-  }
-
-  const payload = JSON.stringify(
-    {
-      format: "tabvault",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      sessions: snaps,
-      collections: cols,
-    },
-    null,
-    2
-  );
-  await downloadTextFile(`${folder}/tabvault-backup-${stamp}.json`, payload);
-  await chrome.storage.local.set({ lastBackupAt: Date.now(), lastBackupError: null });
-  return { files: 1, sessions: snaps.length };
-}
-
-export interface LocalBackupFileInfo {
-  id: number;
-  filename: string;
-  shortName: string;
-  fileSize: number;
-  startTime: string;
-}
-
-export async function listLocalBackups(): Promise<{ granted: boolean; files: LocalBackupFileInfo[] }> {
-  const granted = (await chrome.permissions?.contains?.({ permissions: ["downloads"] }).catch(() => false)) ?? false;
-  if (!granted || !chrome.downloads?.search) return { granted, files: [] };
-
-  const settings = await getSettings();
-  const folder = (settings.localBackupFolder || "TabVault").replace(/[\\/:*?"<>|]/g, "_").toLowerCase();
-  const items = await chrome.downloads.search({ exists: true, orderBy: ["-startTime"], limit: 100 }).catch(() => []);
-  const files: LocalBackupFileInfo[] = [];
-  for (const item of items) {
-    const rawName = item.filename || "";
-    const lower = rawName.toLowerCase().replace(/\\/g, "/");
-    if (!lower.endsWith(".json")) continue;
-    if (
-      !lower.includes("tabvault-backup-") &&
-      !lower.includes("smarttabber-backup-") &&
-      !lower.includes(`/${folder}/`)
-    ) {
-      continue;
-    }
-    const parts = rawName.replace(/\\/g, "/").split("/");
-    files.push({
-      id: item.id,
-      filename: rawName,
-      shortName: parts[parts.length - 1] || rawName,
-      fileSize: item.fileSize || 0,
-      startTime: item.startTime || "",
-    });
-    if (files.length >= 25) break;
-  }
-  return { granted: true, files };
-}
-
-export async function showLocalBackup(id: number): Promise<void> {
-  chrome.downloads?.show?.(id);
-}
-
-export async function deleteLocalBackup(id: number): Promise<void> {
-  await chrome.downloads?.removeFile?.(id).catch(() => {});
-  await chrome.downloads?.erase?.({ id }).catch(() => {});
-}
-
-export async function syncCollectionsToBookmarks(): Promise<void> {
-  const settings = await getSettings();
-  if (!settings.mirrorToBookmarks) return;
-  if (!(await chrome.permissions.contains({ permissions: ["bookmarks"] }))) return;
-
-  const cols = await getAllCollections();
-  const tree = await chrome.bookmarks.getTree();
-  const otherFolder = tree[0]?.children?.find((c) => c.id === "2") || tree[0]?.children?.[1] || tree[0];
-  if (!otherFolder) return;
-
-  const existing = (otherFolder.children || []).find((c) => c.title === "TabVault");
-  let rootId: string;
-  if (existing) {
-    const children = await chrome.bookmarks.getChildren(existing.id);
-    for (const child of children) {
-      await chrome.bookmarks.removeTree(child.id).catch(() => {});
-    }
-    rootId = existing.id;
-  } else {
-    const created = await chrome.bookmarks.create({ parentId: otherFolder.id, title: "TabVault" });
-    rootId = created.id;
-  }
-
-  for (const col of cols.filter((c) => !c.archived && c.items.length > 0)) {
-    const folder = await chrome.bookmarks.create({ parentId: rootId, title: col.title || "Collection" });
-    for (const item of col.items) {
-      await chrome.bookmarks.create({ parentId: folder.id, title: item.title, url: item.url }).catch(() => {});
-    }
-  }
-}
+export {
+  attachOffscreenDownloadListener,
+  cleanupOffscreenDownloads,
+  deleteLocalBackup,
+  downloadTextFile,
+  listLocalBackups,
+  showLocalBackup,
+  writeLocalBackup,
+  type LocalBackupFileInfo,
+} from "./local-backups.ts";
+export {
+  buildRestoreBookmarkUrl,
+  listPinnedBookmarks,
+  pinToBookmarksBar,
+  syncCollectionsToBookmarks,
+  unpinFromBookmarksBar,
+} from "./bookmarks-sync.ts";
 
 // ============================================================================
 // Google Drive AppData Sync via OAuth2 PKCE (Brave + Chrome compatible)
@@ -527,10 +247,17 @@ export async function hasSessionDrivePassword(): Promise<boolean> {
   return Boolean(await getSessionDrivePassword());
 }
 
+let driveSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let activeDriveSync: Promise<{ uploaded: number; imported: number }> | null = null;
+
 export async function maybeAutoSyncDrive(settings: Settings): Promise<void> {
   if (!settings.driveSyncEnabled || !settings.driveAutoSync) return;
   if (settings.driveEncryptE2E && !(await hasSessionDrivePassword())) return;
-  await driveSyncNow().catch(() => {});
+  if (driveSyncDebounceTimer) clearTimeout(driveSyncDebounceTimer);
+  driveSyncDebounceTimer = setTimeout(() => {
+    driveSyncDebounceTimer = null;
+    void driveSyncNow().catch(() => {});
+  }, 4000);
 }
 
 export async function driveSignOut(): Promise<void> {
@@ -648,11 +375,30 @@ interface RemoteSyncPayload {
   sessions?: SessionSnapshot[];
   collections?: CollectionRecord[];
   deletedIds?: Record<string, number>;
+  settings?: Partial<Settings>;
+  settingsUpdatedAt?: number;
 }
 
-export async function driveSyncNow(password?: string): Promise<{ uploaded: number; imported: number }> {
+function extractSyncableSettings(s: Settings): Partial<Settings> {
+  const { deviceName: _d, driveClientId: _cid, driveClientSecret: _csec, ...syncable } = s;
+  return syncable;
+}
+
+export function driveSyncNow(password?: string): Promise<{ uploaded: number; imported: number }> {
+  if (activeDriveSync) return activeDriveSync;
+  activeDriveSync = runDriveSyncNow(password).finally(() => {
+    activeDriveSync = null;
+  });
+  return activeDriveSync;
+}
+
+async function runDriveSyncNow(password?: string): Promise<{ uploaded: number; imported: number }> {
   try {
-    const settings = await getSettings();
+    let settings = await getSettings();
+    const metaLocal = (await chrome.storage.local.get("settingsUpdatedAt").catch(() => ({}))) as {
+      settingsUpdatedAt?: unknown;
+    };
+    let localSettingsUpdatedAt = typeof metaLocal.settingsUpdatedAt === "number" ? metaLocal.settingsUpdatedAt : 0;
     const effectivePassword = password?.trim()
       ? password
       : settings.driveEncryptE2E
@@ -738,6 +484,19 @@ export async function driveSyncNow(password?: string): Promise<{ uploaded: numbe
             imported++;
           }
         }
+
+        if (
+          remote.settings &&
+          typeof remote.settings === "object" &&
+          typeof remote.settingsUpdatedAt === "number" &&
+          remote.settingsUpdatedAt > localSettingsUpdatedAt
+        ) {
+          const safeRemote = extractSyncableSettings(remote.settings as Settings);
+          settings = await saveSettings(safeRemote);
+          localSettingsUpdatedAt = remote.settingsUpdatedAt;
+          await chrome.storage.local.set({ settingsUpdatedAt: localSettingsUpdatedAt }).catch(() => {});
+          imported++;
+        }
       }
     }
 
@@ -760,6 +519,8 @@ export async function driveSyncNow(password?: string): Promise<{ uploaded: numbe
       sessions: toUploadSnaps,
       collections: allCols,
       deletedIds: prunedTombstones,
+      settings: extractSyncableSettings(settings),
+      settingsUpdatedAt: localSettingsUpdatedAt || now,
     });
 
     if (settings.driveEncryptE2E) {
@@ -940,61 +701,4 @@ export async function importFromRawText(rawText: string, password?: string) {
     tabs: tabsAdded,
     deduped: dedupedTabs,
   };
-}
-
-export function buildRestoreBookmarkUrl(type: "session" | "collection", id: string): string {
-  return chrome.runtime.getURL(`dashboard.html?restore=${type}:${encodeURIComponent(id)}&autoclose=1`);
-}
-
-export async function listPinnedBookmarks(): Promise<string[]> {
-  if (!(await chrome.permissions.contains({ permissions: ["bookmarks"] }))) return [];
-  const prefix = chrome.runtime.getURL("dashboard.html?restore=");
-  const matches = await chrome.bookmarks.search({ query: prefix }).catch(() => []);
-  const keys: string[] = [];
-  for (const m of matches) {
-    if (!m.url || !m.url.startsWith(prefix)) continue;
-    try {
-      const u = new URL(m.url);
-      const val = u.searchParams.get("restore");
-      if (val) keys.push(val);
-    } catch {
-      /* ignore malformed */
-    }
-  }
-  return keys;
-}
-
-export async function pinToBookmarksBar(opts: {
-  type: "session" | "collection";
-  id: string;
-  title: string;
-}): Promise<boolean> {
-  if (!(await chrome.permissions.contains({ permissions: ["bookmarks"] }))) {
-    throw new Error("Allow Bookmarks permission to pin to the Bookmarks Bar.");
-  }
-  const url = buildRestoreBookmarkUrl(opts.type, opts.id);
-  const existing = await chrome.bookmarks.search({ url }).catch(() => []);
-  const cleanTitle = String(opts.title || "Saved Session").trim().slice(0, 80);
-  if (existing.length > 0) {
-    await chrome.bookmarks.update(existing[0].id, { title: cleanTitle });
-    return true;
-  }
-  const tree = await chrome.bookmarks.getTree();
-  const bar = tree[0]?.children?.find((c) => c.id === "1") || tree[0]?.children?.[0];
-  if (!bar) throw new Error("Bookmarks Bar not found.");
-  await chrome.bookmarks.create({ parentId: bar.id, title: cleanTitle, url });
-  return true;
-}
-
-export async function unpinFromBookmarksBar(opts: {
-  type: "session" | "collection";
-  id: string;
-}): Promise<boolean> {
-  if (!(await chrome.permissions.contains({ permissions: ["bookmarks"] }))) return false;
-  const url = buildRestoreBookmarkUrl(opts.type, opts.id);
-  const existing = await chrome.bookmarks.search({ url }).catch(() => []);
-  for (const bm of existing) {
-    await chrome.bookmarks.remove(bm.id).catch(() => {});
-  }
-  return true;
 }

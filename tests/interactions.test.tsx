@@ -327,7 +327,7 @@ describe("OnboardingCard & useOnboarding longitudinal interactions", () => {
             title: "Turn a window into a Collection",
             description: "Group a window's tabs into a reusable workspace.",
             done: onboarding.progress.createdCollection,
-            actionLabel: "Save Win",
+            actionLabel: "Save Window",
             onAction: () => setCollectionCount(1),
           },
           {
@@ -364,7 +364,7 @@ describe("OnboardingCard & useOnboarding longitudinal interactions", () => {
     expect(screen.getByText("1/4")).toBeTruthy();
 
     // Complete step 2 — previously caused premature closure!
-    fireEvent.click(screen.getByRole("button", { name: "Save Win" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Window" }));
     expect(screen.getByText("2/4")).toBeTruthy();
     expect(screen.queryByTestId("onboarding-hidden")).toBeNull();
 
@@ -478,6 +478,7 @@ describe("DashboardApp interactions", () => {
     expect(screen.getByText("2 selected")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete 2 Sessions" }));
     await waitFor(() =>
       expect(
         rpcCalls.some(
@@ -513,7 +514,7 @@ describe("HeaderExtras & OptionsApp interactions", () => {
     fireEvent.click(trigger);
 
     const pwInput = await screen.findByLabelText("Backup password to unlock auto-sync");
-    expect(screen.getByText("Auto-sync paused (E2E locked)")).toBeTruthy();
+    expect(screen.getByText("Auto-sync paused — enter backup password")).toBeTruthy();
     fireEvent.change(pwInput, { target: { value: "my-secret-pass" } });
     fireEvent.click(screen.getByRole("button", { name: /Unlock & Sync/i }));
 

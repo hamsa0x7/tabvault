@@ -18,6 +18,7 @@ export default defineConfig({
         options: resolve(import.meta.dirname, "options.html"),
         offscreen: resolve(import.meta.dirname, "offscreen.html"),
         suspend: resolve(import.meta.dirname, "suspend.html"),
+        replaced: resolve(import.meta.dirname, "replaced.html"),
         background: resolve(import.meta.dirname, "src/background/index.ts"),
       },
       output: {

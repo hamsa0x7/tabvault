@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Cloud, Download, FolderOpen, HardDrive, RefreshCw, Trash2 } from "lucide-react";
+import { ConfirmDialog, type ConfirmDialogRequest } from "../../components/ConfirmDialog.tsx";
 import { Button } from "../../components/ui.tsx";
 import { formatTimestamp, plural, triggerTextDownload } from "../../shared/format.ts";
 import { sendBg } from "../../shared/rpc.ts";
@@ -49,6 +50,25 @@ export function BackupsPanel({
   const [downloadsGranted, setDownloadsGranted] = useState<boolean>(true);
   const [driveInfo, setDriveInfo] = useState<DriveBackupInfo | null>(null);
   const [loadingDrive, setLoadingDrive] = useState(false);
+  const [deletingLocalId, setDeletingLocalId] = useState<number | null>(null);
+  const [deletingDrive, setDeletingDrive] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmDialogRequest | null>(null);
+  const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+
+  const requestConfirm = (req: ConfirmDialogRequest): Promise<boolean> => {
+    confirmResolverRef.current?.(false);
+    setConfirmRequest(req);
+    return new Promise<boolean>((resolve) => {
+      confirmResolverRef.current = resolve;
+    });
+  };
+
+  const resolveConfirm = (confirmed: boolean) => {
+    const resolver = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmRequest(null);
+    resolver?.(confirmed);
+  };
 
   const loadLocal = useCallback(async () => {
     try {
@@ -194,7 +214,11 @@ export function BackupsPanel({
                       variant="ghost"
                       className="h-7 w-7"
                       title="Show file in folder"
-                      onClick={() => void sendBg("showLocalBackup", { id: f.id })}
+                      onClick={() =>
+                        void sendBg("showLocalBackup", { id: f.id }).catch((err) =>
+                          onNotify(String((err as Error)?.message || err))
+                        )
+                      }
                     >
                       <FolderOpen className="w-3.5 h-3.5" />
                     </Button>
@@ -203,11 +227,26 @@ export function BackupsPanel({
                       variant="ghost"
                       className="h-7 w-7 text-[var(--st-danger)]"
                       title="Delete backup file from disk"
+                      disabled={deletingLocalId === f.id}
                       onClick={async () => {
-                        if (!window.confirm(`Delete "${f.shortName}" from your computer?`)) return;
-                        await sendBg("deleteLocalBackup", { id: f.id });
-                        await loadLocal();
-                        onNotify(`Deleted ${f.shortName}`);
+                        if (deletingLocalId === f.id) return;
+                        const ok = await requestConfirm({
+                          title: `Delete "${f.shortName}"?`,
+                          description: "This removes the backup file from your computer's Downloads folder.",
+                          confirmLabel: "Delete File",
+                          variant: "danger",
+                        });
+                        if (!ok) return;
+                        setDeletingLocalId(f.id);
+                        try {
+                          await sendBg("deleteLocalBackup", { id: f.id });
+                          await loadLocal();
+                          onNotify(`Deleted ${f.shortName}`);
+                        } catch (err) {
+                          onNotify(String((err as Error)?.message || err));
+                        } finally {
+                          setDeletingLocalId(null);
+                        }
                       }}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -229,6 +268,11 @@ export function BackupsPanel({
         <p className="text-[12px] text-[var(--st-muted)]">
           {state?.driveConnected ? `Connected as ${state.driveEmail || "Google account"}` : "Not connected"}
         </p>
+        {state?.driveConnected && settings.driveEncryptE2E && state?.driveE2EUnlocked === false && (
+          <div className="p-2 rounded-md bg-[var(--st-warn-bg)] border border-[var(--st-warn-bd)] text-[11.5px] text-[var(--st-warn-ink)]">
+            Cloud sync is locked for this browser session. Enter your backup password in the Google account menu (or Configure) to resume auto-sync.
+          </div>
+        )}
         {state?.lastSyncError && (
           <div className="p-2 rounded-md bg-[var(--st-warn-bg)] border border-[var(--st-warn-bd)] text-[11.5px] text-[var(--st-warn-ink)]">
             {state.lastSyncError}
@@ -285,7 +329,7 @@ export function BackupsPanel({
               Sign in with Google to inspect, download, or manage your cloud backup file.
             </p>
           ) : loadingDrive && !driveInfo ? (
-            <p className="text-[11.5px] text-[var(--st-muted)]">Checking Google Drive appDataFolder…</p>
+            <p className="text-[11.5px] text-[var(--st-muted)]">Checking your private Google Drive backup…</p>
           ) : !driveInfo?.exists ? (
             <p className="text-[11.5px] text-[var(--st-muted)]">
               No cloud backup file yet. Click <strong>Sync Now</strong> to upload your first backup.
@@ -326,25 +370,37 @@ export function BackupsPanel({
                   variant="outline"
                   className="h-7 px-2.5 text-[11.5px] text-[var(--st-danger)]"
                   title="Delete the remote backup file from your Google Drive"
+                  disabled={deletingDrive}
                   onClick={async () => {
-                    if (!window.confirm("Delete your remote Google Drive backup file? Local data is not affected.")) return;
+                    if (deletingDrive) return;
+                    const ok = await requestConfirm({
+                      title: "Delete Google Drive backup?",
+                      description: "This removes your remote cloud backup file. Local sessions and collections are not affected.",
+                      confirmLabel: "Delete Cloud Backup",
+                      variant: "danger",
+                    });
+                    if (!ok) return;
+                    setDeletingDrive(true);
                     try {
                       await sendBg("deleteDriveBackup");
                       await loadDrive();
                       onNotify("Deleted remote Google Drive backup.");
                     } catch (err) {
                       onNotify((err as Error).message);
+                    } finally {
+                      setDeletingDrive(false);
                     }
                   }}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  Delete Cloud Backup
+                  {deletingDrive ? "Deleting…" : "Delete Cloud Backup"}
                 </Button>
               </div>
             </div>
           )}
         </div>
       </div>
+      <ConfirmDialog request={confirmRequest} onResolve={resolveConfirm} />
     </div>
   );
 }

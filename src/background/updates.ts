@@ -48,6 +48,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     const res = await fetch(`${DRIVE_TOKEN_PROXY_URL}/releases/latest`, {
       method: "GET",
       headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
     });
     if (res.ok) {
       const data = (await res.json()) as {

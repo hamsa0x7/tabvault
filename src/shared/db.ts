@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from "./defaults.ts";
 import { metaOf } from "./core.ts";
 import type {
   CollectionRecord,
+  ContextMenuItemId,
   RecoveryState,
   SessionSnapshot,
   Settings,
@@ -141,6 +142,28 @@ const ALLOWED_UI_DENSITY = new Set(["dense", "compact", "normal", "expanded"]);
 const ALLOWED_URL_DISPLAY = new Set(["domain", "abbreviated", "full", "none"]);
 const ALLOWED_TIMESTAMP_MODE = new Set(["relative", "absolute"]);
 const ALLOWED_COPY_FORMATS = new Set(["titleAndUrl", "markdown", "json", "csv", "html", "onetab"]);
+const ALLOWED_CONTEXT_MENU_ITEMS = new Set<ContextMenuItemId>([
+  "saveSnapshot",
+  "sendTab",
+  "sendExceptThis",
+  "sendLeft",
+  "sendRight",
+  "sendGroup",
+  "sendWindow",
+  "excludeDomain",
+  "sendTabPrev",
+  "sendWinPrev",
+  "openDashboard",
+  "openSidePanel",
+  "sendAllWindows",
+  "nukeAll",
+  "suspendTab",
+  "sleepIdle",
+  "groupByDomain",
+  "dedupeTabs",
+  "saveLink",
+  "openSettings",
+]);
 const ALLOWED_BACKUP_SCHEDULE = new Set(["off", "startup", "hourly", "daily", "weekly"]);
 
 const ENUM_SETS: Partial<Record<keyof Settings, Set<string>>> = {
@@ -195,6 +218,24 @@ export function sanitizeSettingsPatch(raw: unknown): Partial<Settings> {
           (x): x is Settings["enabledCopyFormats"][number] =>
             typeof x === "string" && ALLOWED_COPY_FORMATS.has(x)
         );
+      }
+      continue;
+    }
+
+    if (key === "contextMenuItems") {
+      if (Array.isArray(val)) {
+        const seen = new Set<ContextMenuItemId>();
+        const cleaned: ContextMenuItemId[] = [];
+        for (const x of val) {
+          if (typeof x === "string" && ALLOWED_CONTEXT_MENU_ITEMS.has(x as ContextMenuItemId)) {
+            const id = x as ContextMenuItemId;
+            if (!seen.has(id)) {
+              seen.add(id);
+              cleaned.push(id);
+            }
+          }
+        }
+        out.contextMenuItems = cleaned;
       }
       continue;
     }
@@ -346,6 +387,45 @@ export async function getAllSnapshots(): Promise<SessionSnapshot[]> {
       return await shadow.getAll("snapshots");
     } catch {
       return [];
+    }
+  }
+}
+
+/** Fetches only snapshots of a given kind using the `by-kind` index, avoiding full-store RAM loads. */
+export async function getSnapshotsByKind(kind: SessionSnapshot["kind"]): Promise<SessionSnapshot[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("snapshots", "by-kind", kind);
+  } catch {
+    try {
+      const shadow = await getShadowDB();
+      return await shadow.getAllFromIndex("snapshots", "by-kind", kind);
+    } catch {
+      return [];
+    }
+  }
+}
+
+/** Streams snapshots newest-first via the `by-t` index and stops early when `visitor` returns `false`. */
+export async function forEachSnapshotDesc(
+  visitor: (snap: SessionSnapshot) => boolean | void
+): Promise<void> {
+  const iterate = async (db: IDBPDatabase<TabVaultDB>) => {
+    const tx = db.transaction("snapshots", "readonly");
+    let cursor = await tx.store.index("by-t").openCursor(null, "prev");
+    while (cursor) {
+      if (visitor(cursor.value) === false) break;
+      cursor = await cursor.continue();
+    }
+    await tx.done;
+  };
+  try {
+    await iterate(await getDB());
+  } catch {
+    try {
+      await iterate(await getShadowDB());
+    } catch {
+      /* ignore */
     }
   }
 }

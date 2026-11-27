@@ -1,4 +1,18 @@
-import type { Settings } from "./types.ts";
+import type { ContextMenuItemId, Settings } from "./types.ts";
+
+export const DEFAULT_CONTEXT_MENU_ITEMS: ContextMenuItemId[] = [
+  "saveSnapshot",
+  "sendTab",
+  "sendExceptThis",
+  "sendLeft",
+  "sendRight",
+  "sendGroup",
+  "sendWindow",
+  "excludeDomain",
+  "sendTabPrev",
+  "sendWinPrev",
+  "openDashboard",
+];
 
 export const DEFAULT_SUSPEND_WHITELIST: string[] = [
   "meet.google.com",
@@ -12,6 +26,19 @@ export const DEFAULT_SUSPEND_WHITELIST: string[] = [
 ];
 
 export const WORKER_BASE_URL = "https://tabvault-oauth.94artsdesignstudio-bd8.workers.dev";
+
+export const COLLECTION_COLORS = [
+  "#0EA5E9",
+  "#10B981",
+  "#F59E0B",
+  "#6366F1",
+  "#EF4444",
+  "#14B8A6",
+  "#8B5CF6",
+  "#64748B",
+] as const;
+
+export const DEFAULT_COLLECTION_COLOR = COLLECTION_COLORS[0];
 
 export const DEFAULT_SETTINGS: Settings = {
   autoSaveEnabled: true,
@@ -121,4 +148,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
   autoApplyUpdates: true,
   checkUpdatesOnStartup: true,
+
+  contextMenuEnabled: true,
+  contextMenuItems: [...DEFAULT_CONTEXT_MENU_ITEMS],
 };

@@ -16,7 +16,9 @@ creds/
 
 # Local research, scratch & logs
 _research_extensions/
-brag-output/
+brag-output*/
+release_videos/
+FEATURE_PORTING_MATRIX.md
 mockup-redesign.html
 EX_AUD_REPORT.md
 *.log

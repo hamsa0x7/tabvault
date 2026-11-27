@@ -13,6 +13,7 @@ import {
 import {
   deleteCollection,
   deleteSnapshots,
+  forEachSnapshotDesc,
   getAllCollections,
   getAllSnapshots,
   getBootMetrics,
@@ -21,6 +22,7 @@ import {
   getRecovery,
   getSettings,
   getSnapshot,
+  getSnapshotsByKind,
   putCollection,
   putSnapshot,
   recordSyncTombstones,
@@ -140,8 +142,8 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
         ...rest,
         tabs: rest.tabs.map(({ id: _tid, ...t }) => t),
       }));
-      const all = await getAllSnapshots();
-      const { exact, closest } = findMatchingSavedSession(clean, all);
+      const named = await getSnapshotsByKind("named");
+      const { exact, closest } = findMatchingSavedSession(clean, named);
       return {
         exact: exact ? metaOf(exact) : null,
         closest: closest ? { meta: metaOf(closest.snap), overlap: closest.overlap } : null,
@@ -222,7 +224,8 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
         s.sig = signature(patch.windows);
       }
       s.updatedAt = Date.now();
-      return putSnapshot(s);
+      await putSnapshot(s);
+      return s;
     },
 
     async deduplicateSnapshot({ id }) {
@@ -253,11 +256,9 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
       if (!Array.isArray(ids) || ids.length < 2) {
         throw new Error("Select at least 2 sessions to merge.");
       }
-      const loaded: SessionSnapshot[] = [];
-      for (const id of ids) {
-        const s = await getSnapshot(id);
-        if (s) loaded.push(s);
-      }
+      const loaded = (await Promise.all(ids.map((id) => getSnapshot(id)))).filter(
+        (s): s is SessionSnapshot => Boolean(s)
+      );
       if (loaded.length < 2) throw new Error("Selected sessions could not be found.");
       const windows = loaded.flatMap((s) => s.windows).filter((w) => w.tabs.length > 0);
       const now = Date.now();
@@ -668,8 +669,7 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
         }
       });
 
-      const snaps = (await getAllSnapshots()).sort((a, b) => b.t - a.t);
-      for (const s of snaps) {
+      await forEachSnapshotDesc((s) => {
         s.windows.forEach((w, wi) => {
           for (const t of w.tabs) {
             const hay = `${t.title} ${t.url} ${s.name} ${(s.tags || []).join(" ")}`.toLowerCase();
@@ -687,8 +687,8 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
             }
           }
         });
-        if (hits.length >= 250) break;
-      }
+        if (hits.length >= 250) return false;
+      });
 
       const cols = await getAllCollections();
       for (const c of cols) {
@@ -716,7 +716,13 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
     },
 
     async openUrl({ url, active }) {
-      if (!isRestorable(url)) throw new Error("This address is restricted by the browser and can't be opened here.");
+      const cleanUrl = String(url || "").trim();
+      if (!cleanUrl || /^(javascript|vbscript|data):/i.test(cleanUrl)) {
+        throw new Error("This address is restricted by the browser and can't be opened here.");
+      }
+      const targetUrl = isRestorable(cleanUrl)
+        ? cleanUrl
+        : chrome.runtime.getURL(`replaced.html#${new URLSearchParams({ url: cleanUrl }).toString()}`);
       const s = await getSettings();
       const shouldActivate =
         active !== undefined
@@ -726,7 +732,7 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
             : s.urlClickInClosedSession === "closed"
               ? false
               : s.switchToOpenedTab;
-      const createOpts: chrome.tabs.CreateProperties = { url, active: shouldActivate };
+      const createOpts: chrome.tabs.CreateProperties = { url: targetUrl, active: shouldActivate };
       if (s.openNextToActive) {
         const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
         if (activeTab && typeof activeTab.index === "number") {
@@ -774,12 +780,16 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
 
     async setSettings({ patch }) {
       const next = await saveSettings(patch);
+      await chrome.storage.local.set({ settingsUpdatedAt: Date.now() }).catch(() => {});
       if (patch && "driveEncryptE2E" in patch && !next.driveEncryptE2E) {
         await setSessionDrivePassword(null);
       }
       const keys = Object.keys(patch || {});
       if (keys.includes("toolbarClickAction")) {
         await setupSidePanelBehavior(next);
+      }
+      if (keys.includes("contextMenuEnabled") || keys.includes("contextMenuItems")) {
+        await setupContextMenus();
       }
       const alarmKeys = [
         "autoSaveEnabled",
@@ -809,6 +819,7 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
       if (keys.length === 0 || keys.includes("showBadgeAlert") || keys.includes("showTabCountBadge")) {
         await updateBadge();
       }
+      void maybeAutoSyncDrive(next);
       return next;
     },
 
@@ -980,6 +991,51 @@ export function createRpcHandlers(deps: HandlerDeps): RpcHandlerMap {
 
     async applyPendingUpdate() {
       chrome.runtime.reload();
+      return { ok: true };
+    },
+
+    async listRecentlyClosed() {
+      const granted = chrome.permissions?.contains
+        ? await chrome.permissions.contains({ permissions: ["sessions"] }).catch(() => false)
+        : Boolean(chrome.sessions?.getRecentlyClosed);
+      if (!granted || !chrome.sessions?.getRecentlyClosed) {
+        return { granted: false, items: [] };
+      }
+      const sessions = await chrome.sessions.getRecentlyClosed({ maxResults: 25 }).catch(() => []);
+      const items = sessions
+        .map((entry) => {
+          if (entry.tab) {
+            return {
+              sessionId: entry.tab.sessionId || "",
+              lastModified: entry.lastModified * 1000,
+              isWindow: false,
+              title: entry.tab.title || entry.tab.url || "Closed tab",
+              url: entry.tab.url || "",
+              tabCount: 1,
+            };
+          }
+          if (entry.window) {
+            const tabs = entry.window.tabs || [];
+            return {
+              sessionId: entry.window.sessionId || "",
+              lastModified: entry.lastModified * 1000,
+              isWindow: true,
+              title: `Closed window (${tabs.length} ${tabs.length === 1 ? "tab" : "tabs"})`,
+              url: tabs[0]?.url || "",
+              tabCount: tabs.length,
+            };
+          }
+          return null;
+        })
+        .filter((x): x is NonNullable<typeof x> => Boolean(x && x.sessionId));
+      return { granted: true, items };
+    },
+
+    async restoreRecentlyClosed({ sessionId }) {
+      if (!chrome.sessions?.restore) {
+        throw new Error("Sessions API is not available.");
+      }
+      await chrome.sessions.restore(sessionId);
       return { ok: true };
     },
   };

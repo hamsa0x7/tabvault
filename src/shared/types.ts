@@ -128,6 +128,28 @@ export interface CopyTemplate {
   format: string;
 }
 
+export type ContextMenuItemId =
+  | "saveSnapshot"
+  | "sendTab"
+  | "sendExceptThis"
+  | "sendLeft"
+  | "sendRight"
+  | "sendGroup"
+  | "sendWindow"
+  | "excludeDomain"
+  | "sendTabPrev"
+  | "sendWinPrev"
+  | "openDashboard"
+  | "openSidePanel"
+  | "sendAllWindows"
+  | "nukeAll"
+  | "suspendTab"
+  | "sleepIdle"
+  | "groupByDomain"
+  | "dedupeTabs"
+  | "saveLink"
+  | "openSettings";
+
 export interface Settings {
   // Auto-Save & Triggers
   autoSaveEnabled: boolean;
@@ -249,6 +271,10 @@ export interface Settings {
   // Updates
   autoApplyUpdates: boolean;
   checkUpdatesOnStartup: boolean;
+
+  // Context Menu
+  contextMenuEnabled: boolean;
+  contextMenuItems: ContextMenuItemId[];
 }
 
 export interface UpdateCheckResult {

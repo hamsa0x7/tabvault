@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { AlertTriangle, Check, Clock, Cloud, Copy, LogOut, RefreshCw, Send, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Cloud, Copy, LogOut, Moon, RefreshCw, Send, X } from "lucide-react";
 import { WORKER_BASE_URL } from "../shared/defaults.ts";
 import { formatTimestamp } from "../shared/format.ts";
 import { sendBg } from "../shared/rpc.ts";
 import type { AppStateSummary } from "../shared/types.ts";
-import { Button, Input, cn } from "./ui.tsx";
+import { Button, Input, Textarea, cn } from "./ui.tsx";
 
 const ACCOUNT_SEEN_KEY = "tabvault:accountMenuSeen";
 
@@ -106,7 +106,7 @@ export function HeaderAccountButton({
       });
       setE2ePassword("");
       await onRefresh();
-      onToast(`Synced (${res.uploaded} up, ${res.imported} down)`);
+      onToast(`Synced: ${res.uploaded} uploaded, ${res.imported} imported`);
     } catch (err) {
       onToast(String((err as Error)?.message || err));
     } finally {
@@ -135,7 +135,7 @@ export function HeaderAccountButton({
           data-tip={
             connected
               ? e2eLocked
-                ? `Google: ${email} (Auto-sync paused — unlock password)`
+                ? `Google: ${email} (Auto-sync paused — enter backup password)`
                 : `Google: ${email}`
               : "Sign in with Google"
           }
@@ -149,15 +149,15 @@ export function HeaderAccountButton({
         >
           <GoogleGlyph className="w-3.5 h-3.5 shrink-0" />
           {!compact && (
-            <span className="max-w-[140px] truncate">
-              {connected ? email : "Sign in"}
+            <span className="max-w-[160px] truncate">
+              {connected ? (e2eLocked ? `${email} · Locked` : email) : "Sign in"}
             </span>
           )}
           {connected && (
             <span
               className={cn(
                 "w-2 h-2 rounded-full ring-2 ring-[var(--st-surface)] shrink-0",
-                e2eLocked ? "bg-amber-500" : "bg-[var(--st-success)]",
+                e2eLocked ? "bg-[var(--st-star)]" : "bg-[var(--st-success)]",
                 compact && "absolute -bottom-0.5 -right-0.5"
               )}
               aria-hidden="true"
@@ -184,11 +184,11 @@ export function HeaderAccountButton({
                 <div
                   className={cn(
                     "flex items-center gap-1.5 text-[11px] font-semibold",
-                    e2eLocked ? "text-amber-600 dark:text-amber-400" : "text-[var(--st-success)]"
+                    e2eLocked ? "text-[var(--st-star)]" : "text-[var(--st-success)]"
                   )}
                 >
                   <Cloud className="w-3.5 h-3.5" />
-                  {e2eLocked ? "Auto-sync paused (E2E locked)" : "Google Drive Connected"}
+                  {e2eLocked ? "Auto-sync paused — enter backup password" : "Google Drive Connected"}
                 </div>
                 <div className="text-[12.5px] font-semibold truncate">{email}</div>
                 <div className="text-[11px] text-[var(--st-muted)]">
@@ -345,6 +345,158 @@ export function useDownloadsPermission() {
   return { granted, request, recheck };
 }
 
+export function WelcomeInstallBanner({
+  state,
+  onRefresh,
+  onToast,
+  onDismiss,
+}: {
+  state: AppStateSummary | null;
+  onRefresh: () => void | Promise<void>;
+  onToast: (msg: string) => void;
+  onDismiss: () => void;
+}) {
+  const [downloadsGranted, setDownloadsGranted] = useState(false);
+  const [busyDownloads, setBusyDownloads] = useState(false);
+  const [busyDrive, setBusyDrive] = useState(false);
+
+  useEffect(() => {
+    chrome.permissions
+      ?.contains?.({ permissions: ["downloads"] })
+      .then((ok) => setDownloadsGranted(Boolean(ok)))
+      .catch(() => {});
+  }, []);
+
+  const handleAllowDownloads = async () => {
+    if (busyDownloads || downloadsGranted) return;
+    setBusyDownloads(true);
+    try {
+      const ok = await chrome.permissions.request({ permissions: ["downloads"] });
+      setDownloadsGranted(Boolean(ok));
+      if (ok) {
+        onToast("Downloads backup permission enabled");
+        await onRefresh();
+      }
+    } catch {
+      onToast("Could not request Downloads permission.");
+    } finally {
+      setBusyDownloads(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (busyDrive || state?.driveConnected) return;
+    setBusyDrive(true);
+    try {
+      if (chrome.permissions?.request) {
+        const granted = await chrome.permissions.request({ permissions: ["identity"] }).catch(() => false);
+        if (!granted) {
+          onToast("Allow Google Sign-In permission to continue.");
+          return;
+        }
+      }
+      await sendBg("driveSignIn");
+      let syncWarning: string | null = null;
+      await sendBg("driveSyncNow").catch((err) => {
+        syncWarning = String((err as Error)?.message || err);
+      });
+      await onRefresh();
+      onToast(syncWarning ? `Signed in to Google Drive (initial sync paused: ${syncWarning})` : "Signed in to Google Drive");
+    } catch (err) {
+      onToast(String((err as Error).message || err));
+    } finally {
+      setBusyDrive(false);
+    }
+  };
+
+  const intervalMin = state?.settings.autoSaveIntervalMin ?? 5;
+  const driveConnected = Boolean(state?.driveConnected);
+  const driveEmail = state?.driveEmail;
+
+  return (
+    <div className="rounded-xl border border-[var(--st-border)] bg-[var(--st-surface)] p-4 sm:p-5 shadow-sm space-y-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <img src="icons/logo.svg" alt="TabVault" className="w-8 h-8 rounded-lg shrink-0 mt-0.5" />
+          <div className="min-w-0 space-y-1">
+            <h2 className="text-[15px] font-bold tracking-tight text-[var(--st-ink)]">
+              Welcome to TabVault
+            </h2>
+            <p className="text-[12.5px] text-[var(--st-muted)] leading-relaxed">
+              TabVault automatically protects your open windows, tabs, and Chrome Tab Groups—and lets you save, organize, and restore them anytime.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss welcome banner"
+          className="text-[var(--st-muted)] hover:text-[var(--st-ink)] p-1 rounded cursor-pointer shrink-0"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-2 text-[12px]">
+        <div className="rounded-lg bg-[var(--st-subtle)] px-3 py-2 space-y-0.5">
+          <div className="font-semibold text-[var(--st-ink)]">Auto-Save ({intervalMin}m)</div>
+          <div className="text-[var(--st-muted)] leading-snug">
+            On by default. Saves open windows automatically and on window close.
+          </div>
+        </div>
+        <div className="rounded-lg bg-[var(--st-subtle)] px-3 py-2 space-y-0.5">
+          <div className="font-semibold text-[var(--st-ink)]">Crash Recovery</div>
+          <div className="text-[var(--st-muted)] leading-snug">
+            On by default. Alerts you if tabs didn&apos;t reopen after a restart.
+          </div>
+        </div>
+        <div className="rounded-lg bg-[var(--st-subtle)] px-3 py-2 space-y-0.5">
+          <div className="font-semibold text-[var(--st-ink)]">Smart Restore &amp; Groups</div>
+          <div className="text-[var(--st-muted)] leading-snug">
+            Preserves Chrome Tab Groups and skips duplicate already-open tabs.
+          </div>
+        </div>
+      </div>
+
+      <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--st-border)]">
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          <Button
+            size="sm"
+            variant={downloadsGranted ? "outline" : "primary"}
+            disabled={busyDownloads || downloadsGranted}
+            onClick={() => void handleAllowDownloads()}
+          >
+            {downloadsGranted && <Check className="w-3.5 h-3.5 text-[var(--st-success)]" />}
+            {downloadsGranted
+              ? "Downloads Backups Allowed"
+              : busyDownloads
+                ? "Requesting…"
+                : "Allow Downloads Backups"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busyDrive || driveConnected}
+            onClick={() => void handleGoogleSignIn()}
+          >
+            <Cloud className="w-3.5 h-3.5" />
+            {driveConnected
+              ? `Google Drive: ${driveEmail || "Connected"}`
+              : busyDrive
+                ? "Signing in…"
+                : "Sign in with Google"}
+          </Button>
+        </div>
+        <div className="pt-2">
+          <Button size="sm" variant="ghost" onClick={onDismiss}>
+            Skip for now
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BackupPermissionBanner({
   onToast,
   compact = false,
@@ -400,6 +552,57 @@ export function BackupPermissionBanner({
         </button>
       </div>
     </div>
+  );
+}
+
+export function HeaderSleepButton({
+  state,
+  onRefresh,
+  onToast,
+  compact = false,
+}: {
+  state: AppStateSummary | null;
+  onRefresh: () => void | Promise<void>;
+  onToast: (msg: string) => void;
+  compact?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const enabled = Boolean(state?.settings.suspenderEnabled);
+  const mins = state?.settings.suspendAfterMin ?? 30;
+  const tip = enabled
+    ? `Tab Sleep ON (${mins}m idle) — click to disable`
+    : "Tab Sleep OFF — click to enable";
+
+  const handleToggle = async () => {
+    if (busy || !state) return;
+    setBusy(true);
+    try {
+      const next = !enabled;
+      await sendBg("setSettings", { patch: { suspenderEnabled: next } });
+      await onRefresh();
+      onToast(next ? `Tab Sleep enabled (${mins}m idle)` : "Tab Sleep disabled");
+    } catch (err) {
+      onToast(String((err as Error).message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Button
+      size={compact ? "icon-sm" : "icon"}
+      variant="outline"
+      disabled={busy || !state}
+      onClick={() => void handleToggle()}
+      data-tip={tip}
+      aria-label={tip}
+      aria-pressed={enabled}
+      className={cn(
+        enabled && "border-[var(--st-accent)]/50 bg-[var(--st-accent-soft)] text-[var(--st-accent)] hover:bg-[var(--st-accent-soft)]"
+      )}
+    >
+      <Moon className={cn("w-3.5 h-3.5", enabled && "fill-current")} />
+    </Button>
   );
 }
 
@@ -572,12 +775,15 @@ export function FeedbackDialog({
       return;
     }
     setSubmitting(true);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
     try {
       const prefix = kind === "issue" ? "[Issue]" : "[Recommendation]";
       const version = chrome.runtime?.getManifest?.().version || "1.0.0";
       const res = await fetch(`${WORKER_BASE_URL}/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           kind,
           title: `${prefix} ${summary.trim()}`.slice(0, 200),
@@ -596,6 +802,7 @@ export function FeedbackDialog({
     } catch {
       onToast("Could not submit right now. You can Copy and try again.");
     } finally {
+      clearTimeout(timer);
       setSubmitting(false);
     }
   };
@@ -605,10 +812,14 @@ export function FeedbackDialog({
       onToast("Please enter a short summary first.");
       return;
     }
-    await navigator.clipboard.writeText(buildText());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-    onToast("Copied to clipboard");
+    try {
+      await navigator.clipboard.writeText(buildText());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+      onToast("Copied to clipboard");
+    } catch {
+      onToast("Could not access clipboard.");
+    }
   };
 
   return (
@@ -670,7 +881,7 @@ export function FeedbackDialog({
               aria-label="Summary"
               className="w-full h-8 text-[12.5px]"
             />
-            <textarea
+            <Textarea
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               rows={4}
@@ -680,7 +891,7 @@ export function FeedbackDialog({
                   : "How would you use this in your workflow?"
               }
               aria-label="Details"
-              className="w-full rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] p-2.5 text-[12.5px] focus:outline-none focus:border-[var(--st-accent)] resize-none"
+              className="resize-none"
             />
           </div>
 

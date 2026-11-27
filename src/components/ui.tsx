@@ -55,13 +55,29 @@ export function GlobalTooltip() {
       activeEl = null;
       setTip(null);
     };
+    const onFocusIn = (e: FocusEvent) => {
+      const target = (e.target as HTMLElement | null)?.closest?.("[data-tip]") as HTMLElement | null;
+      if (target) showFor(target);
+    };
+    const onFocusOut = () => {
+      hide();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") hide();
+    };
     document.addEventListener("mouseover", onOver, true);
     document.addEventListener("mouseout", onOut, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    document.addEventListener("keydown", onKeyDown, true);
     document.addEventListener("mousedown", hide, true);
     window.addEventListener("scroll", hide, true);
     return () => {
       document.removeEventListener("mouseover", onOver, true);
       document.removeEventListener("mouseout", onOut, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+      document.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("mousedown", hide, true);
       window.removeEventListener("scroll", hide, true);
     };
@@ -89,11 +105,14 @@ export const Button = React.forwardRef<
   React.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: "primary" | "outline" | "ghost" | "dark" | "danger";
     size?: "default" | "sm" | "icon" | "icon-sm";
+    loading?: boolean;
   }
->(({ className, variant = "outline", size = "default", type = "button", title, ...props }, ref) => (
+>(({ className, variant = "outline", size = "default", type = "button", title, loading = false, disabled, ...props }, ref) => (
   <button
     ref={ref}
     type={type}
+    disabled={disabled || loading}
+    aria-busy={loading || undefined}
     data-tip={title || undefined}
     aria-label={props["aria-label"] || title}
     className={cn(
@@ -114,32 +133,55 @@ export const Button = React.forwardRef<
 ));
 Button.displayName = "Button";
 
-export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, ...props }, ref) => (
-    <input
-      ref={ref}
-      className={cn(
-        "h-8 px-2.5 rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] text-[13px] text-[var(--st-ink)] placeholder:text-[var(--st-muted)] focus:outline-none focus:border-[var(--st-accent)] transition-colors",
-        className
-      )}
-      {...props}
-    />
-  )
-);
+export const Input = React.forwardRef<
+  HTMLInputElement,
+  React.InputHTMLAttributes<HTMLInputElement> & { error?: boolean | string }
+>(({ className, error, ...props }, ref) => (
+  <input
+    ref={ref}
+    aria-invalid={error ? "true" : props["aria-invalid"]}
+    className={cn(
+      "h-8 px-2.5 rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] text-[13px] text-[var(--st-ink)] placeholder:text-[var(--st-muted)] focus:border-[var(--st-accent)] transition-colors",
+      error && "border-[var(--st-danger)]",
+      className
+    )}
+    {...props}
+  />
+));
 Input.displayName = "Input";
 
-export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
-  ({ className, ...props }, ref) => (
-    <select
-      ref={ref}
-      className={cn(
-        "h-8 px-2.5 rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] text-[13px] text-[var(--st-ink)] focus:outline-none focus:border-[var(--st-accent)] transition-colors",
-        className
-      )}
-      {...props}
-    />
-  )
-);
+export const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement> & { error?: boolean | string }
+>(({ className, error, ...props }, ref) => (
+  <textarea
+    ref={ref}
+    aria-invalid={error ? "true" : props["aria-invalid"]}
+    className={cn(
+      "w-full rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] p-2.5 text-[12.5px] text-[var(--st-ink)] placeholder:text-[var(--st-muted)] focus:border-[var(--st-accent)] transition-colors",
+      error && "border-[var(--st-danger)]",
+      className
+    )}
+    {...props}
+  />
+));
+Textarea.displayName = "Textarea";
+
+export const Select = React.forwardRef<
+  HTMLSelectElement,
+  React.SelectHTMLAttributes<HTMLSelectElement> & { error?: boolean | string }
+>(({ className, error, ...props }, ref) => (
+  <select
+    ref={ref}
+    aria-invalid={error ? "true" : props["aria-invalid"]}
+    className={cn(
+      "h-8 px-2.5 rounded-md border border-[var(--st-border)] bg-[var(--st-surface)] text-[13px] text-[var(--st-ink)] focus:border-[var(--st-accent)] transition-colors",
+      error && "border-[var(--st-danger)]",
+      className
+    )}
+    {...props}
+  />
+));
 Select.displayName = "Select";
 
 export function Switch({
