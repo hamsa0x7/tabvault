@@ -1,0 +1,6 @@
+name = "tabvault-oauth"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+GITHUB_REPO = "hamsa0x7/tabvault"

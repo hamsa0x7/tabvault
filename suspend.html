@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sleeping Tab — TabVault</title>
+    <link rel="icon" type="image/svg+xml" href="icons/favicon.svg" />
+    <link rel="stylesheet" href="/src/styles/app.css" />
+  </head>
+  <body class="min-h-screen bg-[var(--st-canvas)] text-[var(--st-ink)] flex items-center justify-center p-6">
+    <div id="root" class="max-w-lg w-full p-6 rounded-xl bg-[var(--st-surface)] border border-[var(--st-border)] space-y-4">
+      <div class="flex items-center gap-3">
+        <img id="fav" class="w-6 h-6 rounded" alt="" hidden />
+        <div class="min-w-0">
+          <h1 id="title" class="text-[15px] font-semibold truncate">Sleeping tab</h1>
+          <p id="urlText" class="text-xs text-[var(--st-muted)] truncate"></p>
+        </div>
+      </div>
+      <p class="text-[13px] text-[var(--st-muted)]">This tab was put to sleep to save memory. Click anywhere or press the button below to load it again.</p>
+      <div class="flex gap-2">
+        <button id="wakeBtn" class="h-8 px-3 rounded-md bg-[var(--st-accent)] text-[var(--st-accent-fg)] text-[13px] font-medium cursor-pointer">Wake Tab</button>
+      </div>
+    </div>
+    <script type="module" src="/src/pages/suspend/main.ts"></script>
+  </body>
+</html>

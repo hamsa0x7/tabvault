@@ -1,0 +1,24 @@
+# Dependencies & build output
+node_modules/
+dist/
+.wrangler/
+cloudflare-worker/.wrangler/
+
+# Secrets, keys, and credentials (never commit)
+creds/
+*.pem
+*.key
+.env
+.env.*
+
+# Release & draft archives
+*.zip
+
+# Local research, scratch & logs
+_research_extensions/
+brag-output/
+mockup-redesign.html
+EX_AUD_REPORT.md
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,23 @@
+TabVault Third-Party Open Source Notices
+============================================
+
+This bundle includes the following third-party open-source packages and fonts:
+
+1. React & React DOM (MIT License)
+   Copyright (c) Meta Platforms, Inc. and affiliates.
+
+2. Radix UI Primitives (@radix-ui/react-checkbox, @radix-ui/react-dialog,
+   @radix-ui/react-dropdown-menu, @radix-ui/react-switch, @radix-ui/react-tabs)
+   (MIT License) — Copyright (c) WorkOS / Radix Contributors.
+
+3. Lucide Icons (lucide-react) (ISC License)
+   Copyright (c) Lucide Contributors.
+
+4. idb (ISC License)
+   Copyright (c) 2016, Jake Archibald.
+
+5. clsx & tailwind-merge & Tailwind CSS (MIT License)
+   Copyright (c) Luke Edwards; Dany Castillo; Tailwind Labs Inc.
+
+6. Barlow Semi Condensed (@fontsource/barlow-semi-condensed)
+   (SIL Open Font License 1.1) — Copyright 2017 The Barlow Project Authors.

@@ -1,0 +1,100 @@
+{
+  "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzMbZxd/T01u1nKrhjh93ssdfZ+9qZzm3mU+hM250zUNV7g6rQXOFv/sH/ubfIXEkfwdAS+A3mhldDRx5BsWEd8V2JjgfxG0XxtLe1pJFCDQ0hAKfYF2ZygwrbehmxJ0t1sz/07U6xYO9Qt8SslTmw6AE1Ch6nbHea41SUAIA1ciI8hHhIGty8rNP5dNd4ev2ugV2w+94OkdYj874+VZFeaRNEWUvn8Cfth2yUirs8+QK44DxJIO4axt4srfLkIH7Y8rmQG0/3MuBHdzuaS8ZD1k9k0Rgs/4QyAZIOA9uugAujiyRRr+OGPER0vrQZbL2IGt0Qrhx+jIXZJnbIbqZMQIDAQAB",
+  "name": "TabVault — Tab & Session Manager",
+  "short_name": "TabVault",
+  "version": "1.0.0",
+  "description": "Auto-save every window, tab, and tab group. Recover lost sessions in one click and organize tabs locally or with Google Drive.",
+  "minimum_chrome_version": "120",
+  "incognito": "spanning",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "TabVault",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "omnibox": {
+    "keyword": "st"
+  },
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "sidePanel",
+    "contextMenus",
+    "favicon",
+    "offscreen"
+  ],
+  "optional_permissions": [
+    "downloads",
+    "bookmarks",
+    "identity",
+    "scripting",
+    "readingList"
+  ],
+  "optional_host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*",
+    "https://oauth2.googleapis.com/*",
+    "https://tabvault-oauth.94artsdesignstudio-bd8.workers.dev/*"
+  ],
+  "oauth2": {
+    "client_id": "601743842283-2r2p9p6p0i1t24ah7cdrj8hg6tpfq8pq.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.appdata",
+      "https://www.googleapis.com/auth/userinfo.email"
+    ]
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      }
+    },
+    "open-dashboard": {
+      "description": "Open TabVault Dashboard",
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      }
+    },
+    "save-all-windows": {
+      "description": "Save all open windows as a session",
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      }
+    },
+    "collapse-current-window": {
+      "description": "Save and close current window",
+      "suggested_key": {
+        "default": "Alt+Shift+W"
+      }
+    },
+    "nuke-all-windows": {
+      "description": "Save and close all windows"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
