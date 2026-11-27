@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+tone_instructions: "Be concise and technical. Focus on correctness, Chrome extension MV3 security, and TypeScript safety."
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+  path_filters:
+    - "!dist/**"
+    - "!node_modules/**"
+    - "!creds/**"
+    - "!*.zip"
+    - "!_research_extensions/**"
+  path_instructions:
+    - path: "src/**/*.ts"
+      instructions: "Verify strict TypeScript typing, Chrome MV3 service worker lifecycle safety, and proper error handling."
+    - path: "src/**/*.tsx"
+      instructions: "Check React 19 hooks, accessibility, and avoid unnecessary re-renders."
+    - path: "cloudflare-worker/**"
+      instructions: "Audit OAuth token handling, CORS headers, and ensure no secrets are hardcoded."
+    - path: "tests/**"
+      instructions: "Ensure Vitest tests are deterministic and avoid brittle mocks."
