@@ -25,16 +25,44 @@ const urlEl = document.getElementById("urlText");
 const favEl = document.getElementById("fav") as HTMLImageElement | null;
 const wakeBtn = document.getElementById("wakeBtn");
 
+function sanitizeHttpUrl(raw: string, allowFtp = false): string | null {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.href;
+    }
+    if (allowFtp && parsed.protocol === "ftp:") {
+      return parsed.href;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function sanitizeFaviconUrl(raw: string): string | null {
+  const httpUrl = sanitizeHttpUrl(raw);
+  if (httpUrl) return httpUrl;
+  const m = /^data:image\/(png|jpeg|jpg|gif|webp|x-icon|vnd\.microsoft\.icon);base64,([A-Za-z0-9+/=]+)$/i.exec(raw);
+  if (m) {
+    return `data:image/${m[1].toLowerCase()};base64,${m[2]}`;
+  }
+  return null;
+}
+
+const safeTargetUrl = sanitizeHttpUrl(targetUrl, true);
+const safeFavUrl = sanitizeFaviconUrl(fav);
+
 if (titleEl) titleEl.textContent = title;
 if (urlEl) urlEl.textContent = targetUrl;
-if (favEl && /^(https?:|data:image\/)/i.test(fav)) {
-  favEl.src = fav;
+if (favEl && safeFavUrl) {
+  favEl.src = safeFavUrl;
   favEl.hidden = false;
 }
 
 function wake() {
-  if (/^(https?|ftp):\/\//i.test(targetUrl)) {
-    location.replace(targetUrl);
+  if (safeTargetUrl) {
+    location.replace(safeTargetUrl);
   }
 }
 

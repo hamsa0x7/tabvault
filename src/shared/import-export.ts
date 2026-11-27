@@ -217,7 +217,13 @@ function parseBookmarksHtml(html: string): ImportedSessionInput[] {
   let m: RegExpExecArray | null;
   while ((m = rx.exec(html)) !== null) {
     const url = m[1].trim();
-    const title = m[2].replace(/<[^>]+>/g, "").trim() || url;
+    let rawTitle = m[2];
+    let prev: string;
+    do {
+      prev = rawTitle;
+      rawTitle = rawTitle.replace(/<[^>]*>/g, "");
+    } while (rawTitle !== prev);
+    const title = rawTitle.replace(/[<>]/g, "").trim() || url;
     if (/^https?:/i.test(url)) links.push({ url, title });
   }
   return links.length ? [mk("Bookmarks import", Date.now(), [{ tabs: links }], "bookmarksHtml")] : [];
